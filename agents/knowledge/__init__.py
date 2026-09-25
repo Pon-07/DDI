@@ -8,6 +8,13 @@ from agents.knowledge.loader import (
     OpenFDAKnowledgeLoader,
     RxNormKnowledgeLoader,
 )
+from agents.knowledge.dataset_validator import (
+    DatasetValidationError,
+    DatasetValidationIssue,
+    DatasetValidationResult,
+    DatasetValidator,
+    validate_dataset,
+)
 from agents.knowledge.ddinter_adapter import (
     DDInterIngestionAdapter,
     DDInterIngestionResult,
@@ -35,6 +42,11 @@ __all__ = [
     "OpenFDAKnowledgeLoader",
     "DDInterKnowledgeLoader",
     "DDInterLoader",
+    "DatasetValidator",
+    "DatasetValidationResult",
+    "DatasetValidationIssue",
+    "DatasetValidationError",
+    "validate_dataset",
     "DDInterIngestionAdapter",
     "DDInterIngestionResult",
     "RxNormKnowledgeLoader",

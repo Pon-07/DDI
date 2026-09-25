@@ -6,6 +6,8 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from typing import Any, Optional
+
 from sqlalchemy import text
 from database.database import Base, engine
 from models import (  # noqa: F401
@@ -39,15 +41,17 @@ EXPECTED_TABLES = [
 ]
 
 
-def init_db() -> None:
+def init_db(target_engine: Optional[Any] = None, verbose: bool = True) -> None:
     """Initialize the SQLite database schema by creating all defined tables idempotently."""
-    print("Initializing AEGIS Rx SQLite database...")
+    eng = target_engine or engine
+    if verbose:
+        print("Initializing AEGIS Rx SQLite database...")
 
     # Ensure all tables are created idempotently
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=eng)
 
     # Ensure schema migrations for existing tables (e.g. severity on interaction_evidence)
-    with engine.begin() as conn:
+    with eng.begin() as conn:
         cols = [
             row[1]
             for row in conn.execute(text("PRAGMA table_info(interaction_evidence)")).fetchall()
@@ -57,7 +61,7 @@ def init_db() -> None:
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_interaction_evidence_severity ON interaction_evidence(severity)"))
 
     # Query SQLite database metadata for verification
-    with engine.connect() as conn:
+    with eng.connect() as conn:
         journal_mode = conn.execute(text("PRAGMA journal_mode")).scalar()
         foreign_keys = conn.execute(text("PRAGMA foreign_keys")).scalar()
 
@@ -70,18 +74,19 @@ def init_db() -> None:
     if missing_tables:
         raise RuntimeError(f"Database initialization failed. Missing tables: {missing_tables}")
 
-    db_path = engine.url.database or "aegis_rx.db"
+    db_path = eng.url.database or "aegis_rx.db"
     fk_status = "ENABLED" if foreign_keys == 1 else "DISABLED"
 
-    print("\n--- AEGIS Rx Database Verification ---")
-    print(f"Database Path: {db_path}")
-    print(f"Journal Mode:  {str(journal_mode).upper() if journal_mode else 'UNKNOWN'}")
-    print(f"Foreign Keys:  {fk_status}")
-    print(f"Table Count:   {len(existing_tables)} / {len(EXPECTED_TABLES)}")
-    print("Verified Tables:")
-    for table_name in existing_tables:
-        print(f"  - {table_name}")
-    print("--------------------------------------\n")
+    if verbose:
+        print("\n--- AEGIS Rx Database Verification ---")
+        print(f"Database Path: {db_path}")
+        print(f"Journal Mode:  {str(journal_mode).upper() if journal_mode else 'UNKNOWN'}")
+        print(f"Foreign Keys:  {fk_status}")
+        print(f"Table Count:   {len(existing_tables)} / {len(EXPECTED_TABLES)}")
+        print("Verified Tables:")
+        for table_name in existing_tables:
+            print(f"  - {table_name}")
+        print("--------------------------------------\n")
 
 
 if __name__ == "__main__":
