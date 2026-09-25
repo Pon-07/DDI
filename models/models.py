@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, List, Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, JSON, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.database import Base
@@ -140,3 +140,143 @@ class Finding(Base):
 
     def __repr__(self) -> str:
         return f"<Finding(id={self.id}, rule_id='{self.rule_id}', severity='{self.severity}')>"
+
+
+# --- Intelligence Layer Database Models ---
+
+
+class Drug(Base):
+    __tablename__ = "drugs"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    drug_name: Mapped[str] = mapped_column(String(255), index=True)
+    normalized_name: Mapped[str] = mapped_column(String(255), index=True)
+    rxnorm_code: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(100), index=True)
+    source_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    label_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    label_evidences: Mapped[List["LabelEvidence"]] = relationship(
+        back_populates="drug", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<Drug(id={self.id}, name='{self.drug_name}', normalized='{self.normalized_name}')>"
+
+
+class InteractionEvidence(Base):
+    __tablename__ = "interaction_evidence"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    drug_a: Mapped[str] = mapped_column(String(255), index=True)
+    drug_b: Mapped[str] = mapped_column(String(255), index=True)
+    description: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(100), index=True)
+    source_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    evidence_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        Index("ix_interaction_pair", "drug_a", "drug_b"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<InteractionEvidence(id={self.id}, drug_a='{self.drug_a}', drug_b='{self.drug_b}', source='{self.source}')>"
+
+
+class LabelEvidence(Base):
+    __tablename__ = "label_evidence"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    drug_id: Mapped[Optional[int]] = mapped_column(ForeignKey("drugs.id"), nullable=True, index=True)
+    drug_name: Mapped[str] = mapped_column(String(255), index=True)
+    section: Mapped[str] = mapped_column(String(100), index=True)
+    text: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(String(100), index=True)
+    source_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    evidence_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    drug: Mapped[Optional["Drug"]] = relationship(back_populates="label_evidences")
+
+    __table_args__ = (
+        Index("ix_label_drug_section", "drug_name", "section"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<LabelEvidence(id={self.id}, drug_name='{self.drug_name}', section='{self.section}', source='{self.source}')>"
+
+
+class RuleVersion(Base):
+    __tablename__ = "rule_versions"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    pack_name: Mapped[str] = mapped_column(String(100), index=True)
+    version: Mapped[str] = mapped_column(String(50), index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    rules_count: Mapped[int] = mapped_column(default=0)
+    content_hash: Mapped[str] = mapped_column(String(64), index=True)
+    status: Mapped[str] = mapped_column(String(50), default="active", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    safety_rules: Mapped[List["SafetyRule"]] = relationship(
+        back_populates="rule_version", cascade="all, delete-orphan"
+    )
+
+    def __repr__(self) -> str:
+        return f"<RuleVersion(id={self.id}, pack='{self.pack_name}', version='{self.version}')>"
+
+
+class SafetyRule(Base):
+    __tablename__ = "safety_rules"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    rule_id: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    rule_type: Mapped[str] = mapped_column(String(50), index=True)
+    category: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    drug_a: Mapped[str] = mapped_column(String(255), index=True)
+    drug_b: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, index=True)
+    source: Mapped[str] = mapped_column(String(100), index=True)
+    source_version: Mapped[str] = mapped_column(String(50))
+    evidence_id: Mapped[str] = mapped_column(String(100), index=True)
+    evidence_text: Mapped[str] = mapped_column(Text)
+    severity: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    action: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="active", index=True)
+    version_id: Mapped[Optional[int]] = mapped_column(ForeignKey("rule_versions.id"), nullable=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    rule_version: Mapped[Optional["RuleVersion"]] = relationship(back_populates="safety_rules")
+
+    __table_args__ = (
+        Index("ix_safety_rule_pair", "drug_a", "drug_b"),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SafetyRule(id={self.id}, rule_id='{self.rule_id}', rule_type='{self.rule_type}')>"
+
+
+class AuditLedger(Base):
+    __tablename__ = "audit_ledger"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    timestamp: Mapped[str] = mapped_column(String(100), index=True)
+    actor: Mapped[str] = mapped_column(String(100), index=True)
+    event_type: Mapped[str] = mapped_column(String(100), index=True)
+    payload: Mapped[Any] = mapped_column(JSON)
+    prev_hash: Mapped[str] = mapped_column(String(64), index=True)
+    hash: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+
+    def __repr__(self) -> str:
+        return f"<AuditLedger(id={self.id}, actor='{self.actor}', event_type='{self.event_type}')>"
+
