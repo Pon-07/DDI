@@ -8,7 +8,7 @@ from agents.safety.workflow import run_safety_check
 
 app = FastAPI(title="Medication Safety Platform")
 
-OPENFDA_FILE = r"data_validation\openFDA\openFDA_validated_labels_part1.csv"
+DDINTER_FILE = r"data_validation\ddinter_normalized.json"
 
 ddi_records = []
 
@@ -21,13 +21,12 @@ class MedicationRequest(BaseModel):
 def load_knowledge():
     global ddi_records
 
-    data = load_dataset(OPENFDA_FILE)
-    ddi_records = normalize_dataset(data, "openfda")
+    data = load_dataset(DDINTER_FILE)
+    ddi_records = normalize_dataset(data, "ddinter")
 
     return len(ddi_records)
 
 
-# Load knowledge automatically when the API starts
 load_knowledge()
 
 
