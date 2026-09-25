@@ -174,6 +174,7 @@ class InteractionEvidence(Base):
     drug_a: Mapped[str] = mapped_column(String(255), index=True)
     drug_b: Mapped[str] = mapped_column(String(255), index=True)
     description: Mapped[str] = mapped_column(Text)
+    severity: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     source: Mapped[str] = mapped_column(String(100), index=True)
     source_version: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     evidence_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
@@ -185,7 +186,7 @@ class InteractionEvidence(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<InteractionEvidence(id={self.id}, drug_a='{self.drug_a}', drug_b='{self.drug_b}', source='{self.source}')>"
+        return f"<InteractionEvidence(id={self.id}, drug_a='{self.drug_a}', drug_b='{self.drug_b}', severity='{self.severity}', source='{self.source}')>"
 
 
 class LabelEvidence(Base):

@@ -46,6 +46,16 @@ def init_db() -> None:
     # Ensure all tables are created idempotently
     Base.metadata.create_all(bind=engine)
 
+    # Ensure schema migrations for existing tables (e.g. severity on interaction_evidence)
+    with engine.begin() as conn:
+        cols = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(interaction_evidence)")).fetchall()
+        ]
+        if cols and "severity" not in cols:
+            conn.execute(text("ALTER TABLE interaction_evidence ADD COLUMN severity VARCHAR(50)"))
+            conn.execute(text("CREATE INDEX IF NOT EXISTS ix_interaction_evidence_severity ON interaction_evidence(severity)"))
+
     # Query SQLite database metadata for verification
     with engine.connect() as conn:
         journal_mode = conn.execute(text("PRAGMA journal_mode")).scalar()

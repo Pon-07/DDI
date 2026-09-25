@@ -71,6 +71,11 @@ class InteractionEvidence(BaseModel):
         min_length=1,
         description="Reported interaction description or mechanism text",
     )
+    severity: Optional[str] = Field(
+        None,
+        max_length=50,
+        description="Reported severity in source dataset (e.g. Major, Moderate, Minor, Unknown)",
+    )
     source: str = Field(
         ...,
         min_length=1,
