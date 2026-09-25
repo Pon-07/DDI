@@ -107,7 +107,14 @@ class ExplicatorService:
         evidence_id = (
             (trace.get("evidence_id") if isinstance(trace, dict) else None)
             or finding_data.get("evidence_id")
-            or (str(finding_id) if str(finding_id) != "UNKNOWN_FINDING" else None)
+        )
+        rule_id = (
+            finding_data.get("rule_id")
+            or (trace.get("rule_id") if isinstance(trace, dict) else None)
+        )
+        source_version = (
+            finding_data.get("source_version")
+            or (trace.get("source_version") if isinstance(trace, dict) else None)
         )
 
         patient_context = {
@@ -125,6 +132,7 @@ class ExplicatorService:
             evidence_id=evidence_id,
             severity=severity,
             action=action,
+            rule_id=rule_id,
         )
 
         final_text = candidate_text
@@ -187,11 +195,13 @@ class ExplicatorService:
             )
             return ExplanationReport(
                 finding_id=finding_id,
+                rule_id=str(rule_id) if rule_id else None,
                 title=title,
                 summary=f"Safety finding for {', '.join(medications) if medications else title} (Fallback)",
                 medications=medications,
                 patient_context=patient_context,
                 evidence_source=source,
+                source_version=str(source_version) if source_version else None,
                 evidence_id=evidence_id,
                 severity=severity,
                 guidance=action,
@@ -204,11 +214,13 @@ class ExplicatorService:
         summary_meds = f" for {', '.join(medications)}" if medications else ""
         return ExplanationReport(
             finding_id=finding_id,
+            rule_id=str(rule_id) if rule_id else None,
             title=title,
             summary=f"Detected safety finding{summary_meds}: {description[:100]}",
             medications=medications,
             patient_context=patient_context,
             evidence_source=source,
+            source_version=str(source_version) if source_version else None,
             evidence_id=evidence_id,
             severity=severity,
             guidance=action,

@@ -65,6 +65,13 @@ class ResolutionCandidate(BaseModel):
             raise ValueError("requires_cosign must always be True. Automatic execution is not permitted.")
         return True
 
+    @property
+    def is_demo_rule(self) -> bool:
+        """Deterministically distinguish prototype demo rules from external validated evidence."""
+        src = (self.source or "").upper()
+        rid = (self.rule_id or "").upper()
+        return "DEMO" in src or "DEMO" in rid or "AEGIS_HACKATHON" in src
+
 
 class ResolutionResult(BaseModel):
     """
@@ -183,10 +190,21 @@ class SimulatedOrder(BaseModel):
         None,
         description="Underlying evidence identifier from validated dataset",
     )
+    resolution_id: Optional[str] = Field(
+        None,
+        description="Identifier of the originating resolution candidate or process",
+    )
     created_at: datetime = Field(
         default_factory=datetime.utcnow,
         description="Timestamp of simulation generation",
     )
+
+    @property
+    def is_demo_rule(self) -> bool:
+        """Deterministically distinguish prototype demo rules from external validated evidence."""
+        src = (self.source or "").upper()
+        rid = (self.rule_id or "").upper()
+        return "DEMO" in src or "DEMO" in rid or "AEGIS_HACKATHON" in src
 
     @field_validator("requires_cosign")
     @classmethod
@@ -287,6 +305,29 @@ class ResolutionPipelineResult(BaseModel):
         None,
         description="Explicit explanation when human review is required or no validated action exists",
     )
+    rule_id: Optional[str] = Field(
+        None,
+        description="Associated safety rule identifier",
+    )
+    source: Optional[str] = Field(
+        None,
+        description="Originating validated knowledge or rule source",
+    )
+    source_version: Optional[str] = Field(
+        None,
+        description="Version string of the knowledge source or rule pack",
+    )
+    evidence_id: Optional[str] = Field(
+        None,
+        description="Underlying evidence identifier from validated dataset",
+    )
+
+    @property
+    def is_demo_rule(self) -> bool:
+        """Deterministically distinguish prototype demo rules from external validated evidence."""
+        src = (self.source or "").upper()
+        rid = (self.rule_id or "").upper()
+        return "DEMO" in src or "DEMO" in rid or "AEGIS_HACKATHON" in src
 
     @field_validator("requires_cosign")
     @classmethod

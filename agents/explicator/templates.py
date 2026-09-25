@@ -10,11 +10,13 @@ class ExplanationReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     finding_id: Union[int, str] = Field(..., description="Unique identifier of the finding or rule")
+    rule_id: Optional[str] = Field(None, description="Identifier of the detection rule or evidence source item")
     title: str = Field(..., description="Title of the detected finding")
     summary: str = Field(..., description="Concise summary statement")
     medications: List[str] = Field(default_factory=list, description="List of involved medication names")
     patient_context: Optional[Dict[str, Any]] = Field(None, description="Explicit patient context present in finding inputs")
     evidence_source: str = Field(..., description="Originating knowledge source")
+    source_version: Optional[str] = Field(None, description="Version string of the evidence or rule source")
     evidence_id: Optional[str] = Field(None, description="Exact evidence identifier")
     severity: str = Field(..., description="Validated severity or 'undetermined'")
     guidance: Optional[str] = Field(None, description="Explicit validated clinical action or None")
@@ -25,6 +27,13 @@ class ExplanationReport(BaseModel):
     full_text: str = Field(..., description="Human-readable formatted explanation text")
     is_fallback: bool = Field(default=False, description="Flag indicating if deterministic fallback was used")
     is_llm_enhanced: bool = Field(default=False, description="Flag indicating if text was rephrased by local Ollama wording model")
+
+    @property
+    def is_demo_rule(self) -> bool:
+        """Deterministically distinguish prototype demo rules from external validated evidence."""
+        src = (self.evidence_source or "").upper()
+        rid = (self.rule_id or "").upper()
+        return "DEMO" in src or "DEMO" in rid or "AEGIS_HACKATHON" in src
 
 
 def render_deterministic_explanation(
@@ -37,12 +46,14 @@ def render_deterministic_explanation(
     evidence_id: Optional[str],
     severity: str,
     action: Optional[str],
+    rule_id: Optional[str] = None,
 ) -> str:
     """
     Render a human-readable explanation using strictly information present in the finding.
     """
     meds_str = ", ".join(medications) if medications else "Unspecified medication(s)"
     ev_id_str = f" (Evidence ID: {evidence_id})" if evidence_id else ""
+    rule_display = f"{rule_id} (Finding #{finding_id})" if (rule_id and str(rule_id) != str(finding_id)) else str(finding_id)
     
     patient_ctx_str = "None specified"
     if patient_context:
@@ -62,7 +73,7 @@ def render_deterministic_explanation(
 
     lines = [
         f"### Medication Safety Finding: {title}",
-        f"- **Rule ID**: {finding_id}",
+        f"- **Rule ID**: {rule_display}",
         f"- **What Was Detected**: {description}",
         f"- **Involved Medication(s)**: {meds_str}",
         f"- **Patient Context**: {patient_ctx_str}",
