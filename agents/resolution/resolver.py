@@ -13,6 +13,24 @@ from agents.rules.schemas import RulePack, SafetyRule as SafetyRuleSchema
 
 DEMO_PACK_PATH = Path(__file__).resolve().parent.parent / "rules" / "packs" / "aegis_hackathon_demo_v1.json"
 
+INVALID_PLACEHOLDERS = frozenset({
+    "", "none", "null", "n/a", "na", "no action", "unknown", "unspecified",
+    "placeholder", "tbd", "todo", "pending", "not available", "unavailable",
+    "none specified", "undefined", "void", "test", "pending clinical review",
+    "pending review", "no recommendation", "not applicable", "n.a.",
+    "no action needed", "no change", "none required", "blank", "unassigned", "inactive"
+})
+
+STOP_KEYWORDS = frozenset({
+    "stop", "discontinue", "discontinuation", "avoid", "hold",
+    "contraindicated", "contraindication", "do not administer", "do not prescribe", "terminate"
+})
+
+CONTINUE_KEYWORDS = frozenset({
+    "continue", "maintain", "increase", "escalate", "administer",
+    "safe to administer", "proceed", "no hold"
+})
+
 
 class SafetyResolutionEngine:
     """
@@ -140,47 +158,54 @@ class SafetyResolutionEngine:
                 pass
         return val if val is not None else default
 
-    def _find_matching_validated_rule(self, finding: Any) -> Optional[Any]:
+    def _find_all_matching_validated_rules(self, finding: Any) -> List[Any]:
         """
-        Search loaded validated rules for a match with finding's rule_id, evidence_id, drug pair, or single drug.
-        Enforces that any matched rule must be in 'active' status.
+        Search loaded validated rules for all matches with finding's rule_id, evidence_id, drug pair, or single drug.
+        Enforces that all matched rules must be in 'active' status.
+        Deterministically deduplicated by rule_id.
         """
         if finding is None:
-            return None
+            return []
+
+        matched_rules: List[Any] = []
+        seen_rule_ids: Set[str] = set()
+
+        def add_rule(r: Any):
+            if not r:
+                return
+            r_id = getattr(r, "rule_id", None) or (r.get("rule_id") if isinstance(r, dict) else None)
+            st = getattr(r, "status", None) or (r.get("status") if isinstance(r, dict) else "active")
+            if str(st).lower().strip() != "active":
+                return
+            r_key = str(r_id or id(r))
+            if r_key not in seen_rule_ids:
+                seen_rule_ids.add(r_key)
+                matched_rules.append(r)
 
         rule_id = self._extract_finding_attr(finding, "rule_id")
         if rule_id and str(rule_id) in self._rules_by_id:
-            rule = self._rules_by_id[str(rule_id)]
-            st = getattr(rule, "status", None) or (rule.get("status") if isinstance(rule, dict) else "active")
-            if str(st).lower().strip() == "active":
-                return rule
+            add_rule(self._rules_by_id[str(rule_id)])
 
         trace = self._extract_finding_attr(finding, "trace", {}) or {}
         if isinstance(trace, dict):
             ev_id = trace.get("evidence_id")
             if ev_id and str(ev_id) in self._rules_by_id:
-                rule = self._rules_by_id[str(ev_id)]
-                st = getattr(rule, "status", None) or (rule.get("status") if isinstance(rule, dict) else "active")
-                if str(st).lower().strip() == "active":
-                    return rule
+                add_rule(self._rules_by_id[str(ev_id)])
 
             tr_rule_id = trace.get("rule_id")
             if tr_rule_id and str(tr_rule_id) in self._rules_by_id:
-                rule = self._rules_by_id[str(tr_rule_id)]
-                st = getattr(rule, "status", None) or (rule.get("status") if isinstance(rule, dict) else "active")
-                if str(st).lower().strip() == "active":
-                    return rule
+                add_rule(self._rules_by_id[str(tr_rule_id)])
 
             matched_pair = trace.get("matched_pair")
             if matched_pair and isinstance(matched_pair, list):
                 if len(matched_pair) == 2:
                     pair_key = f"{str(matched_pair[0]).lower().strip()}_{str(matched_pair[1]).lower().strip()}"
-                    if pair_key in self._rules_by_pair and self._rules_by_pair[pair_key]:
-                        return self._rules_by_pair[pair_key][0]
+                    for r in self._rules_by_pair.get(pair_key, []):
+                        add_rule(r)
                 elif len(matched_pair) == 1:
                     single_key = str(matched_pair[0]).lower().strip()
-                    if single_key in self._rules_by_drug and self._rules_by_drug[single_key]:
-                        return self._rules_by_drug[single_key][0]
+                    for r in self._rules_by_drug.get(single_key, []):
+                        add_rule(r)
 
         inputs = self._extract_finding_attr(finding, "inputs", {}) or {}
         if isinstance(inputs, dict):
@@ -188,14 +213,70 @@ class SafetyResolutionEngine:
             drug_b = inputs.get("drug_b")
             if drug_a and drug_b:
                 pair_key = f"{str(drug_a).lower().strip()}_{str(drug_b).lower().strip()}"
-                if pair_key in self._rules_by_pair and self._rules_by_pair[pair_key]:
-                    return self._rules_by_pair[pair_key][0]
+                for r in self._rules_by_pair.get(pair_key, []):
+                    add_rule(r)
             if drug_a and str(drug_a).lower().strip() in self._rules_by_drug:
-                return self._rules_by_drug[str(drug_a).lower().strip()][0]
+                for r in self._rules_by_drug.get(str(drug_a).lower().strip(), []):
+                    add_rule(r)
             if drug_b and str(drug_b).lower().strip() in self._rules_by_drug:
-                return self._rules_by_drug[str(drug_b).lower().strip()][0]
+                for r in self._rules_by_drug.get(str(drug_b).lower().strip(), []):
+                    add_rule(r)
 
-        return None
+        return matched_rules
+
+    def _find_matching_validated_rule(self, finding: Any) -> Optional[Any]:
+        """
+        Search loaded validated rules for a primary match. Backward compatibility helper.
+        """
+        matches = self._find_all_matching_validated_rules(finding)
+        return matches[0] if matches else None
+
+    def detect_conflicting_guidance(
+        self, candidates: List[ResolutionCandidate]
+    ) -> Tuple[bool, Optional[str]]:
+        """
+        Deterministically detect if a set of candidate actions contains conflicting or contradictory directives.
+        Returns (True, reason) if conflicting guidance is detected, else (False, None).
+        """
+        if not candidates or len(candidates) < 2:
+            return False, None
+
+        has_stop = False
+        has_continue = False
+        stop_actions: List[str] = []
+        continue_actions: List[str] = []
+
+        for c in candidates:
+            desc_lower = (c.description or "").lower()
+            words = set(desc_lower.replace(",", " ").replace(".", " ").replace(";", " ").replace("/", " ").split())
+
+            if any(kw in words or kw in desc_lower for kw in STOP_KEYWORDS):
+                has_stop = True
+                stop_actions.append(c.description)
+
+            if any(kw in words or kw in desc_lower for kw in CONTINUE_KEYWORDS):
+                has_continue = True
+                continue_actions.append(c.description)
+
+        if has_stop and has_continue:
+            return (
+                True,
+                f"Contradictory directives: stop/avoid ({len(stop_actions)} action(s)) vs continue/administer ({len(continue_actions)} action(s))"
+            )
+
+        # Opposing dose direction (increase vs decrease/reduce)
+        has_increase = any("increase" in (c.description or "").lower() for c in candidates)
+        has_decrease = any(
+            "decrease" in (c.description or "").lower() or "reduce" in (c.description or "").lower()
+            for c in candidates
+        )
+        if has_increase and has_decrease:
+            return (
+                True,
+                "Contradictory dosage adjustments: dose increase vs dose decrease/reduction"
+            )
+
+        return False, None
 
     def resolve_finding(
         self,
@@ -231,57 +312,7 @@ class SafetyResolutionEngine:
             or self._extract_finding_attr(finding, "evidence_id")
             or self._extract_finding_attr(finding, "rule_id")
         )
-
-        # Check for explicit validated action:
-        # 1. From an attached validated rule in context
-        matched_rule = self._find_matching_validated_rule(finding)
-        validated_action = None
-        action_source = source
-        action_evidence_id = evidence_id
-        action_type = "validated_guidance"
-
-        if matched_rule:
-            rule_act = getattr(matched_rule, "action", None) or (
-                matched_rule.get("action") if isinstance(matched_rule, dict) else None
-            )
-            if rule_act and str(rule_act).strip():
-                clean_act = str(rule_act).strip()
-                if clean_act.lower() not in {"none", "null", "n/a", "no action", "unspecified", "unknown"}:
-                    validated_action = clean_act
-                    action_source = getattr(matched_rule, "source", None) or (
-                        matched_rule.get("source") if isinstance(matched_rule, dict) else source
-                    )
-                    action_evidence_id = (
-                        getattr(matched_rule, "evidence_id", None)
-                        or getattr(matched_rule, "rule_id", None)
-                        or (matched_rule.get("evidence_id") if isinstance(matched_rule, dict) else None)
-                        or (matched_rule.get("rule_id") if isinstance(matched_rule, dict) else None)
-                    )
-                    action_type = (
-                        getattr(matched_rule, "rule_type", None)
-                        or (matched_rule.get("rule_type") if isinstance(matched_rule, dict) else None)
-                        or "validated_guidance"
-                    )
-
-        if not validated_action:
-            # 2. From finding's own validated action field
-            finding_action = self._extract_finding_attr(finding, "action")
-            if finding_action and str(finding_action).strip():
-                clean_f_act = str(finding_action).strip()
-                if clean_f_act.lower() not in {"none", "null", "n/a", "no action", "unspecified", "unknown"}:
-                    validated_action = clean_f_act
-
-        # If NO explicit validated action exists, human clinical review is strictly required
-        if not validated_action:
-            return ResolutionResult(
-                finding_id=finding_id,
-                status="requires_human_review",
-                candidates=[],
-                review_reason=(
-                    "No explicit validated clinical action is present in the knowledge source. "
-                    "Mandatory clinical review by a licensed healthcare provider is required."
-                ),
-            )
+        finding_desc = self._extract_finding_attr(finding, "description") or "Validated safety finding"
 
         # Check if critical clinical data is missing (never guess or auto-prescribe)
         inputs = self._extract_finding_attr(finding, "inputs", {}) or {}
@@ -295,8 +326,10 @@ class SafetyResolutionEngine:
                 action_type="missing_data_review",
                 description=f"Clinical review required: missing required parameters ({needed_str}). Order baseline labs before proceeding.",
                 rationale=f"Missing clinical data: {needed_str}. Clinical review required.",
-                source=action_source,
-                evidence_id=str(action_evidence_id) if action_evidence_id else None,
+                source=source,
+                rule_id=str(self._extract_finding_attr(finding, "rule_id")) if self._extract_finding_attr(finding, "rule_id") else None,
+                source_version=str(self._extract_finding_attr(finding, "source_version") or (trace.get("source_version") if isinstance(trace, dict) else None) or "") or None,
+                evidence_id=str(evidence_id) if evidence_id else None,
                 requires_cosign=True,
             )
             return ResolutionResult(
@@ -306,27 +339,112 @@ class SafetyResolutionEngine:
                 review_reason=f"Missing clinical data needed: {needed_str}. Mandatory clinician review required.",
             )
 
-        # Create candidate with preserved provenance and mandatory cosign
-        finding_desc = self._extract_finding_attr(finding, "description") or "Validated safety finding"
-        rationale = (
-            f"Validated action from {action_source} (Evidence ID: {action_evidence_id}). "
-            f"Finding: {finding_desc}"
-        )
+        # Match all active validated rules in context
+        matched_rules = self._find_all_matching_validated_rules(finding)
+        candidates: List[ResolutionCandidate] = []
+        action_found = False
+        seen_candidate_actions: Set[Tuple[str, str]] = set()
 
-        candidate = ResolutionCandidate(
-            finding_id=finding_id,
-            action_type=action_type,
-            description=validated_action,
-            rationale=rationale,
-            source=action_source,
-            evidence_id=str(action_evidence_id) if action_evidence_id else None,
-            requires_cosign=True,
-        )
+        for matched_rule in matched_rules:
+            rule_act = getattr(matched_rule, "action", None) or (
+                matched_rule.get("action") if isinstance(matched_rule, dict) else None
+            )
+            if not rule_act or not str(rule_act).strip():
+                continue
+            clean_act = str(rule_act).strip()
+            if clean_act.lower().rstrip(".").rstrip(",") in INVALID_PLACEHOLDERS:
+                continue
+
+            action_source = getattr(matched_rule, "source", None) or (
+                matched_rule.get("source") if isinstance(matched_rule, dict) else source
+            )
+            action_rule_id = getattr(matched_rule, "rule_id", None) or (
+                matched_rule.get("rule_id") if isinstance(matched_rule, dict) else None
+            )
+            action_source_version = getattr(matched_rule, "source_version", None) or (
+                matched_rule.get("source_version") if isinstance(matched_rule, dict) else None
+            )
+            action_evidence_id = (
+                getattr(matched_rule, "evidence_id", None)
+                or getattr(matched_rule, "rule_id", None)
+                or (matched_rule.get("evidence_id") if isinstance(matched_rule, dict) else None)
+                or (matched_rule.get("rule_id") if isinstance(matched_rule, dict) else None)
+                or evidence_id
+            )
+            action_type = (
+                getattr(matched_rule, "rule_type", None)
+                or (matched_rule.get("rule_type") if isinstance(matched_rule, dict) else None)
+                or "validated_guidance"
+            )
+
+            cand_key = (action_type.lower().strip(), clean_act.lower().rstrip(".").rstrip(","))
+            if cand_key in seen_candidate_actions:
+                continue
+            seen_candidate_actions.add(cand_key)
+
+            cand = ResolutionCandidate(
+                finding_id=finding_id,
+                action_type=action_type,
+                description=clean_act,
+                rationale=f"Validated action from {action_source} (Evidence ID: {action_evidence_id}). Finding: {finding_desc}",
+                source=str(action_source),
+                rule_id=str(action_rule_id) if action_rule_id else (str(self._extract_finding_attr(finding, "rule_id")) if self._extract_finding_attr(finding, "rule_id") else None),
+                source_version=str(action_source_version) if action_source_version else (str(self._extract_finding_attr(finding, "source_version") or (trace.get("source_version") if isinstance(trace, dict) else None) or "") or None),
+                evidence_id=str(action_evidence_id) if action_evidence_id else None,
+                requires_cosign=True,
+            )
+            candidates.append(cand)
+            action_found = True
+
+        if not action_found:
+            # Check finding's own validated action field
+            finding_action = self._extract_finding_attr(finding, "action")
+            if finding_action and str(finding_action).strip():
+                clean_f_act = str(finding_action).strip()
+                if clean_f_act.lower().rstrip(".").rstrip(",") not in INVALID_PLACEHOLDERS:
+                    f_rule_id = self._extract_finding_attr(finding, "rule_id")
+                    f_source_version = self._extract_finding_attr(finding, "source_version") or (
+                        trace.get("source_version") if isinstance(trace, dict) else None
+                    )
+                    cand = ResolutionCandidate(
+                        finding_id=finding_id,
+                        action_type="validated_guidance",
+                        description=clean_f_act,
+                        rationale=f"Validated action from {source} (Evidence ID: {evidence_id}). Finding: {finding_desc}",
+                        source=str(source),
+                        rule_id=str(f_rule_id) if f_rule_id else None,
+                        source_version=str(f_source_version) if f_source_version else None,
+                        evidence_id=str(evidence_id) if evidence_id else None,
+                        requires_cosign=True,
+                    )
+                    candidates.append(cand)
+                    action_found = True
+
+        if not action_found or not candidates:
+            return ResolutionResult(
+                finding_id=finding_id,
+                status="requires_human_review",
+                candidates=[],
+                review_reason=(
+                    "No explicit validated clinical action is present in the knowledge source. "
+                    "Mandatory clinical review by a licensed healthcare provider is required."
+                ),
+            )
+
+        # Check for conflicting guidance among candidates
+        has_conflict, conflict_reason = self.detect_conflicting_guidance(candidates)
+        if has_conflict:
+            return ResolutionResult(
+                finding_id=finding_id,
+                status="requires_human_review",
+                candidates=candidates,
+                review_reason=f"Conflicting candidate guidance detected ({conflict_reason}). Mandatory clinician review required.",
+            )
 
         return ResolutionResult(
             finding_id=finding_id,
             status="actionable",
-            candidates=[candidate],
+            candidates=candidates,
             review_reason=None,
         )
 
@@ -351,7 +469,7 @@ class SafetyResolutionEngine:
         Filter candidate actions against strict safety constraints:
         - Mandatory human cosign (requires_cosign must be True).
         - Non-empty description and source.
-        - Rejection of placeholder or non-action text.
+        - Rejection of placeholder, unavailable, inactive, or non-action text.
         - Deterministic deduplication.
         """
         filtered: List[ResolutionCandidate] = []
@@ -363,17 +481,22 @@ class SafetyResolutionEngine:
                 continue
 
             desc = (c.description or "").strip()
-            if not desc or desc.lower() in {"none", "null", "n/a", "no action", "unknown", "unspecified"}:
+            clean_desc = desc.lower().rstrip(".").rstrip(",")
+            if not desc or clean_desc in INVALID_PLACEHOLDERS:
                 continue
 
             source = (c.source or "").strip()
-            if not source or source.lower() == "unknown":
+            if not source or source.lower() in INVALID_PLACEHOLDERS:
+                continue
+
+            action_type = (c.action_type or "").strip()
+            if not action_type or action_type.lower() in INVALID_PLACEHOLDERS:
                 continue
 
             dedup_key = (
                 str(c.finding_id),
-                c.action_type.lower().strip(),
-                desc.lower(),
+                action_type.lower(),
+                clean_desc,
             )
             if dedup_key in seen_keys:
                 continue
@@ -438,13 +561,16 @@ class SafetyResolutionEngine:
             updated_candidate = c.model_copy(update={"priority_score": score})
             scored_candidates.append((score, updated_candidate))
 
-        # Sort descending by score, tie-break deterministically by finding_id, action_type, description
+        # Sort descending by score, tie-break deterministically
         scored_candidates.sort(
             key=lambda item: (
                 -item[0],
                 str(item[1].finding_id),
-                item[1].action_type,
-                item[1].description,
+                (item[1].action_type or "").lower(),
+                (item[1].description or "").lower(),
+                str(item[1].rule_id or "").lower(),
+                str(item[1].evidence_id or "").lower(),
+                str(item[1].source or "").lower(),
             )
         )
         return [item[1] for item in scored_candidates]
@@ -462,6 +588,14 @@ class SafetyResolutionEngine:
         Never invents clinical doses, thresholds, or treatment values.
         Preserves existing medication details if present; otherwise leaves them None.
         """
+        def _clean_med_val(val: Any) -> Optional[str]:
+            if val is None:
+                return None
+            s = str(val).strip()
+            if not s or s.lower().rstrip(".").rstrip(",") in INVALID_PLACEHOLDERS:
+                return None
+            return s
+
         # 1. Resolve patient_id safely
         resolved_patient_id = patient_id
         if resolved_patient_id is None and existing_medication is not None:
@@ -520,7 +654,25 @@ class SafetyResolutionEngine:
                 route = getattr(existing_medication, "route", None)
                 frequency = getattr(existing_medication, "frequency", None)
 
-        # 4. Generate deterministic simulation_id
+        clean_dose = _clean_med_val(dose)
+        clean_dose_unit = _clean_med_val(dose_unit)
+        clean_route = _clean_med_val(route)
+        clean_frequency = _clean_med_val(frequency)
+
+        # 4. Resolve provenance trace
+        trace = self._extract_finding_attr(finding, "trace", {}) or {} if finding else {}
+        order_rule_id = candidate.rule_id or (self._extract_finding_attr(finding, "rule_id") if finding else None)
+        order_source_version = (
+            candidate.source_version
+            or (self._extract_finding_attr(finding, "source_version") if finding else None)
+            or (trace.get("source_version") if isinstance(trace, dict) else None)
+        )
+        order_evidence_id = candidate.evidence_id or (
+            (trace.get("evidence_id") if isinstance(trace, dict) else None)
+            or (self._extract_finding_attr(finding, "evidence_id") if finding else None)
+        )
+
+        # 5. Generate deterministic simulation_id
         raw_key = f"{candidate.finding_id}_{candidate.action_type}_{candidate.description[:20]}"
         hash_suffix = abs(hash(raw_key)) % 1000000
         sim_id = f"SIM-ORD-{candidate.finding_id}-{hash_suffix:06d}"
@@ -533,17 +685,19 @@ class SafetyResolutionEngine:
             drug_name=str(drug_name),
             proposed_action=candidate.description,
             action_type=candidate.action_type,
-            dose=str(dose) if dose is not None else None,
-            dose_unit=str(dose_unit) if dose_unit is not None else None,
-            route=str(route) if route is not None else None,
-            frequency=str(frequency) if frequency is not None else None,
+            dose=clean_dose,
+            dose_unit=clean_dose_unit,
+            route=clean_route,
+            frequency=clean_frequency,
             status="pending_cosign",
             requires_cosign=True,
             auto_execute=False,
             is_simulated=True,
             rationale=candidate.rationale,
             source=candidate.source,
-            evidence_id=candidate.evidence_id,
+            rule_id=str(order_rule_id) if order_rule_id else None,
+            source_version=str(order_source_version) if order_source_version else None,
+            evidence_id=str(order_evidence_id) if order_evidence_id else None,
         )
 
     def _prepare_finding_for_explication(
@@ -613,12 +767,30 @@ class SafetyResolutionEngine:
         # 2. Safety-filtered candidate actions
         filtered_candidates = self.filter_candidate_actions(raw_candidates)
 
+        # Check for conflicting guidance or insufficient guidance among filtered candidates
+        has_conflict, conflict_reason = self.detect_conflicting_guidance(filtered_candidates)
+        if has_conflict:
+            pipeline_status = "requires_human_review"
+            review_reason = f"Conflicting candidate guidance detected ({conflict_reason}). Mandatory clinician review required."
+        elif not filtered_candidates:
+            pipeline_status = "requires_human_review"
+            review_reason = (
+                res_result.review_reason
+                or "No valid candidate actions available. Mandatory clinician review required."
+            )
+        elif res_result.status == "requires_human_review":
+            pipeline_status = "requires_human_review"
+            review_reason = res_result.review_reason
+        else:
+            pipeline_status = "actionable"
+            review_reason = None
+
         # 3. Ranked candidates
         ranked_candidates = self.rank_candidates(filtered_candidates, finding_severity=severity)
 
         # 4. Cosign-ready simulated order
         simulated_order = None
-        if ranked_candidates and res_result.status == "actionable":
+        if ranked_candidates and pipeline_status == "actionable":
             simulated_order = self.create_simulated_order(
                 candidate=ranked_candidates[0],
                 finding=finding,
@@ -641,7 +813,7 @@ class SafetyResolutionEngine:
                 payload={
                     "finding_id": finding_id,
                     "severity": severity,
-                    "status": res_result.status,
+                    "status": pipeline_status,
                     "candidates_count": len(ranked_candidates),
                     "requires_cosign": True,
                     "top_action": ranked_candidates[0].description if ranked_candidates else None,
@@ -687,14 +859,14 @@ class SafetyResolutionEngine:
         return ResolutionPipelineResult(
             finding_id=finding_id,
             finding_severity=severity,
-            status=res_result.status,
+            status=pipeline_status,
             raw_candidates=raw_candidates,
             safety_filtered_candidates=filtered_candidates,
             ranked_candidates=ranked_candidates,
             simulated_order=simulated_order,
             explanation=explanation,
             requires_cosign=True,
-            review_reason=res_result.review_reason,
+            review_reason=review_reason,
         )
 
     def resolve_findings_pipeline(
