@@ -24,6 +24,7 @@ class ExplanationReport(BaseModel):
     )
     full_text: str = Field(..., description="Human-readable formatted explanation text")
     is_fallback: bool = Field(default=False, description="Flag indicating if deterministic fallback was used")
+    is_llm_enhanced: bool = Field(default=False, description="Flag indicating if text was rephrased by local Ollama wording model")
 
 
 def render_deterministic_explanation(
@@ -61,6 +62,7 @@ def render_deterministic_explanation(
 
     lines = [
         f"### Medication Safety Finding: {title}",
+        f"- **Rule ID**: {finding_id}",
         f"- **What Was Detected**: {description}",
         f"- **Involved Medication(s)**: {meds_str}",
         f"- **Patient Context**: {patient_ctx_str}",
