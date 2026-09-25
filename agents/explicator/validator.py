@@ -1,5 +1,16 @@
 import re
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
+
+KNOWN_DRUG_NAMES: Set[str] = {
+    "warfarin", "aspirin", "lisinopril", "spironolactone", "fluconazole",
+    "metformin", "enoxaparin", "atorvastatin", "cimetidine", "enalapril",
+    "clopidogrel", "heparin", "digoxin", "amiodarone", "simvastatin",
+    "ibuprofen", "naproxen", "furosemide", "omeprazole", "apixaban",
+    "rivaroxaban", "dabigatran", "losartan", "amlodipine", "carvedilol",
+    "metoprolol", "diltiazem", "verapamil", "prednisone", "ciprofloxacin",
+    "levofloxacin", "azithromycin", "clarithromycin", "erythromycin",
+    "glipizide", "tramadol", "oxycodone", "morphine", "acetaminophen",
+}
 
 
 class ExplanationValidator:
@@ -8,6 +19,9 @@ class ExplanationValidator:
     in an explanation exist in the supplied Finding inputs and evidence trace.
     Prevents hallucination or fabrication of unverified clinical values.
     """
+
+    def __init__(self, known_drugs: Optional[Set[str]] = None):
+        self.known_drugs = known_drugs if known_drugs is not None else KNOWN_DRUG_NAMES
 
     @staticmethod
     def _extract_numbers(text: str) -> Set[str]:
@@ -77,7 +91,7 @@ class ExplanationValidator:
         if not explanation_text or not explanation_text.strip():
             return False, ["Explanation text is empty."]
 
-        # 1. Validate numeric tokens
+        # 1. Validate numeric tokens: every number must exist in the trace
         allowed_numbers = self._gather_allowed_numbers(finding_data)
         explanation_numbers = self._extract_numbers(explanation_text)
 
@@ -87,10 +101,25 @@ class ExplanationValidator:
                     f"Unverified numeric value '{num}' found in explanation text that is not in the source finding or trace."
                 )
 
-        # 2. Check for foreign drug additions if explicit drug names are provided
+        # 2. Validate medication names: every drug name must exist in the trace
         allowed_drugs = self._gather_allowed_drugs(finding_data)
-        if allowed_drugs:
-            # Check if any known foreign drug markers or terms are injected
-            pass
+        for drug in self.known_drugs:
+            if re.search(rf"\b{re.escape(drug)}\b", explanation_text, re.IGNORECASE):
+                is_allowed = False
+                for ad in allowed_drugs:
+                    ad_clean = ad.lower().strip()
+                    if drug in ad_clean or ad_clean in drug:
+                        is_allowed = True
+                        break
+                if not is_allowed:
+                    for field in ["title", "description", "action", "rule_id", "evidence_id"]:
+                        f_val = str(finding_data.get(field) or "").lower()
+                        if drug in f_val:
+                            is_allowed = True
+                            break
+                if not is_allowed:
+                    errors.append(
+                        f"Unverified drug name '{drug}' found in explanation text that is not in the source finding or trace."
+                    )
 
         return (len(errors) == 0, errors)
