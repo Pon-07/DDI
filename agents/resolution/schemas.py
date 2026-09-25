@@ -37,6 +37,14 @@ class ResolutionCandidate(BaseModel):
         max_length=100,
         description="Originating validated knowledge source (e.g., DDInter, openFDA, RulePack)",
     )
+    rule_id: Optional[str] = Field(
+        None,
+        description="Reference identifier of the safety rule",
+    )
+    source_version: Optional[str] = Field(
+        None,
+        description="Version string of the evidence or rule source",
+    )
     evidence_id: Optional[str] = Field(
         None,
         description="Reference identifier of the underlying evidence or safety rule",
@@ -162,6 +170,14 @@ class SimulatedOrder(BaseModel):
         ...,
         min_length=1,
         description="Originating validated knowledge or rule source",
+    )
+    rule_id: Optional[str] = Field(
+        None,
+        description="Associated safety rule identifier",
+    )
+    source_version: Optional[str] = Field(
+        None,
+        description="Version string of the knowledge source or rule pack",
     )
     evidence_id: Optional[str] = Field(
         None,

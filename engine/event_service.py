@@ -76,205 +76,209 @@ class MedicationEventService:
         """
         payload_data = payload or {}
 
-        # 1. Record event in SQLite `events` table
-        event_record = Event(
-            patient_id=patient_id,
-            event_type=event_type,
-            payload=payload_data,
-            created_at=datetime.utcnow(),
-        )
-        db.add(event_record)
-
-        # 2. Ingest Lab from event if present
-        if "test_name" in payload_data and "value" in payload_data:
-            lab_record = Lab(
+        try:
+            # 1. Record event in SQLite `events` table
+            event_record = Event(
                 patient_id=patient_id,
-                test_name=str(payload_data["test_name"]),
-                value=str(payload_data["value"]),
-                unit=payload_data.get("unit"),
-                reference_range=payload_data.get("reference_range"),
-                measured_at=payload_data.get("measured_at") or datetime.utcnow(),
+                event_type=event_type,
+                payload=payload_data,
                 created_at=datetime.utcnow(),
             )
-            db.add(lab_record)
-            db.flush()
+            db.add(event_record)
 
-        # Ingest Order status modification if present
-        if "status" in payload_data:
-            target_status = str(payload_data["status"]).lower().strip()
-            if "medication_id" in payload_data:
-                med_to_update = db.get(Medication, payload_data["medication_id"])
-                if med_to_update:
-                    med_to_update.status = target_status
-            if "order_id" in payload_data:
-                ord_to_update = db.get(Order, payload_data["order_id"])
-                if ord_to_update:
-                    ord_to_update.status = target_status
-            if "drug_name" in payload_data and target_status in {"discontinued", "cancelled", "inactive"}:
-                meds_by_name = db.execute(
-                    select(Medication).where(
-                        Medication.patient_id == patient_id,
-                        Medication.drug_name == payload_data["drug_name"],
-                    )
-                ).scalars().all()
-                for m in meds_by_name:
-                    m.status = target_status
-
-        # 3. Retrieve Complete Current Patient Context
-        patient = db.execute(
-            select(Patient).where(Patient.id == patient_id)
-        ).scalar_one_or_none()
-
-        med_stmt = select(Medication).where(
-            Medication.patient_id == patient_id,
-            Medication.status.in_(["active", "pending", "ordered", None]),
-        )
-        db_meds = list(db.execute(med_stmt).scalars().all())
-
-        # Include new medication if passed via argument or payload
-        med_to_add = new_medication_name or (
-            payload_data.get("drug_name")
-            if event_type in {"MEDICATION_ORDERED", "ORDER_SUBMITTED", "MEDICATION_ADDED"}
-            and payload_data.get("status", "active") not in {"discontinued", "cancelled"}
-            else None
-        )
-        if med_to_add:
-            existing_names = [
-                m.drug_name.lower().strip()
-                for m in db_meds
-                if getattr(m, "drug_name", None)
-            ]
-            if med_to_add.lower().strip() not in existing_names:
-                db_meds.append({"drug_name": med_to_add, "status": "active"})
-
-        # Retrieve Orders and Chronological Labs
-        orders_stmt = select(Order).where(Order.patient_id == patient_id)
-        orders = list(db.execute(orders_stmt).scalars().all())
-
-        labs_stmt = select(Lab).where(Lab.patient_id == patient_id).order_by(Lab.measured_at.asc(), Lab.id.asc())
-        labs = list(db.execute(labs_stmt).scalars().all())
-
-        existing_findings_stmt = select(DbFinding).where(DbFinding.patient_id == patient_id)
-        existing_findings = list(db.execute(existing_findings_stmt).scalars().all())
-
-        # 4. Run RiskDetector with Complete Current Context
-        detected_findings: List[RiskFinding] = self.detector.detect(
-            patient_context=patient,
-            medications=db_meds,
-            labs=labs,
-            orders=orders,
-            previous_findings=existing_findings,
-            rule_context=self.rule_context,
-        )
-
-        if not detected_findings:
-            db.commit()
-            db.refresh(event_record)
-            return []
-
-        # 5. Compare with Previous Finding State: Deduplicate Unchanged, Re-evaluate Changed
-        existing_by_sig: Dict[Tuple[str, Tuple[str, ...]], DbFinding] = {}
-        for ef in existing_findings:
-            rule_id = str(ef.rule_id)
-            trace_dict = ef.trace if isinstance(ef.trace, dict) else {}
-            matched_pair = tuple(sorted(str(d).lower().strip() for d in trace_dict.get("matched_pair", [])))
-            existing_by_sig[(rule_id, matched_pair)] = ef
-
-        new_db_findings: List[DbFinding] = []
-        reevaluated_db_findings: List[DbFinding] = []
-
-        for df in detected_findings:
-            matched_pair = tuple(sorted(str(d).lower().strip() for d in df.trace.get("matched_pair", [])))
-            sig = (str(df.rule_id), matched_pair)
-
-            if sig not in existing_by_sig:
-                # Brand new finding
-                db_finding = DbFinding(
+            # 2. Ingest Lab from event if present
+            if "test_name" in payload_data and "value" in payload_data:
+                lab_record = Lab(
                     patient_id=patient_id,
-                    rule_id=df.rule_id,
-                    severity=df.severity,
-                    title=df.title,
-                    description=df.description,
-                    action=df.action,
-                    inputs=df.inputs,
-                    trace=df.trace,
+                    test_name=str(payload_data["test_name"]),
+                    value=str(payload_data["value"]),
+                    unit=payload_data.get("unit"),
+                    reference_range=payload_data.get("reference_range"),
+                    measured_at=payload_data.get("measured_at") or datetime.utcnow(),
                     created_at=datetime.utcnow(),
                 )
-                db.add(db_finding)
-                new_db_findings.append(db_finding)
-                existing_by_sig[sig] = db_finding
-            else:
-                # Existing finding - check if clinical context has changed
-                ef = existing_by_sig[sig]
-                ef_inputs = ef.inputs if isinstance(ef.inputs, dict) else {}
-                df_inputs = df.inputs if isinstance(df.inputs, dict) else {}
+                db.add(lab_record)
+                db.flush()
 
-                context_changed = (
-                    ef_inputs.get("inr_context") != df_inputs.get("inr_context")
-                    or ef_inputs.get("inr_trend") != df_inputs.get("inr_trend")
-                    or ef_inputs.get("inr_value") != df_inputs.get("inr_value")
-                    or ef_inputs.get("renal_context") != df_inputs.get("renal_context")
-                    or ef_inputs.get("latest_renal_lab") != df_inputs.get("latest_renal_lab")
-                    or ef_inputs.get("data_needed") != df_inputs.get("data_needed")
-                    or ef.severity != df.severity
-                    or ef.description != df.description
-                    or ef.action != df.action
-                )
+            # Ingest Order status modification if present
+            if "status" in payload_data:
+                target_status = str(payload_data["status"]).lower().strip()
+                if "medication_id" in payload_data:
+                    med_to_update = db.get(Medication, payload_data["medication_id"])
+                    if med_to_update:
+                        med_to_update.status = target_status
+                if "order_id" in payload_data:
+                    ord_to_update = db.get(Order, payload_data["order_id"])
+                    if ord_to_update:
+                        ord_to_update.status = target_status
+                if "drug_name" in payload_data and target_status in {"discontinued", "cancelled", "inactive"}:
+                    meds_by_name = db.execute(
+                        select(Medication).where(
+                            Medication.patient_id == patient_id,
+                            Medication.drug_name == payload_data["drug_name"],
+                        )
+                    ).scalars().all()
+                    for m in meds_by_name:
+                        m.status = target_status
 
-                if context_changed:
-                    # Update finding in-place to reflect updated clinical context
-                    ef.severity = df.severity
-                    ef.title = df.title
-                    ef.description = df.description
-                    ef.action = df.action
-                    ef.inputs = df.inputs
-                    ef.trace = df.trace
-                    reevaluated_db_findings.append(ef)
+            # 3. Retrieve Complete Current Patient Context
+            patient = db.execute(
+                select(Patient).where(Patient.id == patient_id)
+            ).scalar_one_or_none()
+
+            med_stmt = select(Medication).where(
+                Medication.patient_id == patient_id,
+                Medication.status.in_(["active", "pending", "ordered", None]),
+            )
+            db_meds = list(db.execute(med_stmt).scalars().all())
+
+            # Include new medication if passed via argument or payload
+            med_to_add = new_medication_name or (
+                payload_data.get("drug_name")
+                if event_type in {"MEDICATION_ORDERED", "ORDER_SUBMITTED", "MEDICATION_ADDED"}
+                and payload_data.get("status", "active") not in {"discontinued", "cancelled"}
+                else None
+            )
+            if med_to_add:
+                existing_names = [
+                    m.drug_name.lower().strip()
+                    for m in db_meds
+                    if getattr(m, "drug_name", None)
+                ]
+                if med_to_add.lower().strip() not in existing_names:
+                    db_meds.append({"drug_name": med_to_add, "status": "active"})
+
+            # Retrieve Orders and Chronological Labs
+            orders_stmt = select(Order).where(Order.patient_id == patient_id)
+            orders = list(db.execute(orders_stmt).scalars().all())
+
+            labs_stmt = select(Lab).where(Lab.patient_id == patient_id).order_by(Lab.measured_at.asc(), Lab.id.asc())
+            labs = list(db.execute(labs_stmt).scalars().all())
+
+            existing_findings_stmt = select(DbFinding).where(DbFinding.patient_id == patient_id)
+            existing_findings = list(db.execute(existing_findings_stmt).scalars().all())
+
+            # 4. Run RiskDetector with Complete Current Context
+            detected_findings: List[RiskFinding] = self.detector.detect(
+                patient_context=patient,
+                medications=db_meds,
+                labs=labs,
+                orders=orders,
+                previous_findings=existing_findings,
+                rule_context=self.rule_context,
+            )
+
+            if not detected_findings:
+                db.commit()
+                db.refresh(event_record)
+                return []
+
+            # 5. Compare with Previous Finding State: Deduplicate Unchanged, Re-evaluate Changed
+            existing_by_sig: Dict[Tuple[str, Tuple[str, ...]], DbFinding] = {}
+            for ef in existing_findings:
+                rule_id = str(ef.rule_id)
+                trace_dict = ef.trace if isinstance(ef.trace, dict) else {}
+                matched_pair = tuple(sorted(str(d).lower().strip() for d in trace_dict.get("matched_pair", [])))
+                existing_by_sig[(rule_id, matched_pair)] = ef
+
+            new_db_findings: List[DbFinding] = []
+            reevaluated_db_findings: List[DbFinding] = []
+
+            for df in detected_findings:
+                matched_pair = tuple(sorted(str(d).lower().strip() for d in df.trace.get("matched_pair", [])))
+                sig = (str(df.rule_id), matched_pair)
+
+                if sig not in existing_by_sig:
+                    # Brand new finding
+                    db_finding = DbFinding(
+                        patient_id=patient_id,
+                        rule_id=df.rule_id,
+                        severity=df.severity,
+                        title=df.title,
+                        description=df.description,
+                        action=df.action,
+                        inputs=df.inputs,
+                        trace=df.trace,
+                        created_at=datetime.utcnow(),
+                    )
+                    db.add(db_finding)
+                    new_db_findings.append(db_finding)
+                    existing_by_sig[sig] = db_finding
                 else:
-                    # Unchanged finding: do NOT create duplicate row
-                    pass
+                    # Existing finding - check if clinical context has changed
+                    ef = existing_by_sig[sig]
+                    ef_inputs = ef.inputs if isinstance(ef.inputs, dict) else {}
+                    df_inputs = df.inputs if isinstance(df.inputs, dict) else {}
 
-        db.commit()
-        db.refresh(event_record)
-        for f in new_db_findings:
-            db.refresh(f)
-        for f in reevaluated_db_findings:
-            db.refresh(f)
+                    context_changed = (
+                        ef_inputs.get("inr_context") != df_inputs.get("inr_context")
+                        or ef_inputs.get("inr_trend") != df_inputs.get("inr_trend")
+                        or ef_inputs.get("inr_value") != df_inputs.get("inr_value")
+                        or ef_inputs.get("renal_context") != df_inputs.get("renal_context")
+                        or ef_inputs.get("latest_renal_lab") != df_inputs.get("latest_renal_lab")
+                        or ef_inputs.get("data_needed") != df_inputs.get("data_needed")
+                        or ef.severity != df.severity
+                        or ef.description != df.description
+                        or ef.action != df.action
+                    )
 
-        # 6. Audit Logging in Hash-Chained Ledger
-        if self.audit_ledger:
+                    if context_changed:
+                        # Update finding in-place to reflect updated clinical context
+                        ef.severity = df.severity
+                        ef.title = df.title
+                        ef.description = df.description
+                        ef.action = df.action
+                        ef.inputs = df.inputs
+                        ef.trace = df.trace
+                        reevaluated_db_findings.append(ef)
+                    else:
+                        # Unchanged finding: do NOT create duplicate row
+                        pass
+
+            db.commit()
+            db.refresh(event_record)
             for f in new_db_findings:
-                trace_dict = f.trace if isinstance(f.trace, dict) else {}
-                self.audit_ledger.append_event(
-                    actor="risk_detector",
-                    event_type="RISK_FINDING_DETECTED",
-                    payload={
-                        "finding_id": f.id,
-                        "patient_id": f.patient_id,
-                        "rule_id": f.rule_id,
-                        "severity": f.severity,
-                        "title": f.title,
-                        "source": trace_dict.get("source", "Unknown"),
-                        "evidence_id": trace_dict.get("evidence_id"),
-                    },
-                )
+                db.refresh(f)
             for f in reevaluated_db_findings:
-                trace_dict = f.trace if isinstance(f.trace, dict) else {}
-                self.audit_ledger.append_event(
-                    actor="risk_detector",
-                    event_type="RISK_FINDING_REEVALUATED",
-                    payload={
-                        "finding_id": f.id,
-                        "patient_id": f.patient_id,
-                        "rule_id": f.rule_id,
-                        "severity": f.severity,
-                        "title": f.title,
-                        "source": trace_dict.get("source", "Unknown"),
-                        "evidence_id": trace_dict.get("evidence_id"),
-                    },
-                )
+                db.refresh(f)
 
-        return new_db_findings + reevaluated_db_findings
+            # 6. Audit Logging in Hash-Chained Ledger
+            if self.audit_ledger:
+                for f in new_db_findings:
+                    trace_dict = f.trace if isinstance(f.trace, dict) else {}
+                    self.audit_ledger.append_event(
+                        actor="risk_detector",
+                        event_type="RISK_FINDING_DETECTED",
+                        payload={
+                            "finding_id": f.id,
+                            "patient_id": f.patient_id,
+                            "rule_id": f.rule_id,
+                            "severity": f.severity,
+                            "title": f.title,
+                            "source": trace_dict.get("source", "Unknown"),
+                            "evidence_id": trace_dict.get("evidence_id"),
+                        },
+                    )
+                for f in reevaluated_db_findings:
+                    trace_dict = f.trace if isinstance(f.trace, dict) else {}
+                    self.audit_ledger.append_event(
+                        actor="risk_detector",
+                        event_type="RISK_FINDING_REEVALUATED",
+                        payload={
+                            "finding_id": f.id,
+                            "patient_id": f.patient_id,
+                            "rule_id": f.rule_id,
+                            "severity": f.severity,
+                            "title": f.title,
+                            "source": trace_dict.get("source", "Unknown"),
+                            "evidence_id": trace_dict.get("evidence_id"),
+                        },
+                    )
+
+            return new_db_findings + reevaluated_db_findings
+        except Exception:
+            db.rollback()
+            raise
 
     def process_event_with_resolutions(
         self,
@@ -292,13 +296,17 @@ class MedicationEventService:
         -> SafetyResolutionEngine -> candidate filtering + ranking
         -> SimulatedOrder -> Explicator -> AuditLedger.
         """
-        affected_findings = self.process_event(
-            db=db,
-            patient_id=patient_id,
-            event_type=event_type,
-            payload=payload,
-            new_medication_name=new_medication_name,
-        )
+        try:
+            affected_findings = self.process_event(
+                db=db,
+                patient_id=patient_id,
+                event_type=event_type,
+                payload=payload,
+                new_medication_name=new_medication_name,
+            )
+        except Exception:
+            db.rollback()
+            raise
 
         ctx_to_use = rule_context or self.rule_context
         engine = self.resolution_engine or SafetyResolutionEngine(
