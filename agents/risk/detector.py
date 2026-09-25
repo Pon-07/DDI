@@ -40,12 +40,14 @@ class RiskDetector:
         patient_context: Optional[Any] = None,
         medications: Optional[List[Any]] = None,
         labs: Optional[List[Any]] = None,
+        orders: Optional[List[Any]] = None,
         rule_context: Optional[Any] = None,
     ):
         self.knowledge_service = knowledge_service
         self.patient_context = patient_context
         self.medications = medications or []
         self.labs = labs or []
+        self.orders = orders or []
         self.rule_context = rule_context
 
         # Load demo rules from package if present
@@ -221,6 +223,82 @@ class RiskDetector:
                 deduped.append(r)
         return deduped
 
+    @staticmethod
+    def is_finding_unchanged(finding: Finding, previous_finding: Any) -> bool:
+        """Deterministically check if a finding's clinical inputs, severity, and description are unchanged."""
+        prev_inputs = (
+            previous_finding.get("inputs")
+            if isinstance(previous_finding, dict)
+            else getattr(previous_finding, "inputs", {})
+        ) or {}
+        if isinstance(prev_inputs, str):
+            try:
+                prev_inputs = json.loads(prev_inputs)
+            except Exception:
+                prev_inputs = {}
+
+        prev_desc = (
+            previous_finding.get("description")
+            if isinstance(previous_finding, dict)
+            else getattr(previous_finding, "description", "")
+        )
+        prev_severity = (
+            previous_finding.get("severity")
+            if isinstance(previous_finding, dict)
+            else getattr(previous_finding, "severity", "")
+        )
+        return (
+            finding.description == prev_desc
+            and finding.inputs == prev_inputs
+            and finding.severity == prev_severity
+        )
+
+    def filter_unchanged_findings(
+        self,
+        current_findings: List[Finding],
+        previous_findings: List[Any],
+    ) -> List[Finding]:
+        """
+        Deduplicates current findings against previous findings.
+        Returns only findings that are new or whose clinical context/inputs have changed.
+        """
+        if not previous_findings:
+            return list(current_findings)
+
+        prev_by_sig: Dict[Tuple[str, Tuple[str, ...]], Any] = {}
+        for pf in previous_findings:
+            rule_id = str(
+                pf.get("rule_id") if isinstance(pf, dict) else getattr(pf, "rule_id", "")
+            )
+            trace = (
+                pf.get("trace") if isinstance(pf, dict) else getattr(pf, "trace", {})
+            ) or {}
+            if isinstance(trace, str):
+                try:
+                    trace = json.loads(trace)
+                except Exception:
+                    trace = {}
+            matched = tuple(
+                sorted(str(d).lower().strip() for d in trace.get("matched_pair", []))
+            )
+            prev_by_sig[(rule_id, matched)] = pf
+
+        filtered: List[Finding] = []
+        for cf in current_findings:
+            matched = tuple(
+                sorted(str(d).lower().strip() for d in cf.trace.get("matched_pair", []))
+            )
+            sig = (str(cf.rule_id), matched)
+
+            if sig not in prev_by_sig:
+                filtered.append(cf)
+            else:
+                prev = prev_by_sig[sig]
+                if not self.is_finding_unchanged(cf, prev):
+                    filtered.append(cf)
+
+        return filtered
+
     def detect(
         self,
         patient_context: Optional[Any] = None,
@@ -229,6 +307,7 @@ class RiskDetector:
         orders: Optional[List[Any]] = None,
         previous_findings: Optional[List[Any]] = None,
         rule_context: Optional[Any] = None,
+        filter_unchanged: bool = False,
     ) -> List[Finding]:
         """
         Execute deterministic risk detection for complete patient context.
@@ -247,21 +326,61 @@ class RiskDetector:
         ctx = patient_context if patient_context is not None else self.patient_context
         med_list = medications if medications is not None else self.medications
         lab_list = labs if labs is not None else self.labs
+        order_list = orders if orders is not None else self.orders
 
         patient_id = self._extract_patient_id(ctx)
         clean_labs = self._extract_labs(lab_list)
+        normalizer = self.knowledge_service.normalizer
 
-        # Extract active drug names
-        active_drugs: List[str] = []
+        # Determine discontinued / cancelled drugs from orders
+        discontinued_by_order: Set[str] = set()
+        active_order_drugs: List[str] = []
+        if order_list:
+            for ord_item in order_list:
+                ord_status = (
+                    ord_item.get("status")
+                    if isinstance(ord_item, dict)
+                    else getattr(ord_item, "status", None)
+                )
+                ord_name = (
+                    ord_item.get("drug_name") or ord_item.get("name")
+                    if isinstance(ord_item, dict)
+                    else (getattr(ord_item, "drug_name", None) or getattr(ord_item, "name", None))
+                )
+                if ord_name:
+                    norm_ord = normalizer.normalize(str(ord_name)).lower().strip()
+                    if ord_status and str(ord_status).lower() in {"inactive", "discontinued", "cancelled", "completed"}:
+                        discontinued_by_order.add(norm_ord)
+                    elif ord_status in {"active", "ordered", "pending", None} or not ord_status:
+                        active_order_drugs.append(str(ord_name).strip())
+
+        # Extract active drug names from med_list
+        all_active_meds: List[str] = []
         for item in med_list:
             d_name = self._extract_drug_name(item)
-            if d_name and d_name not in active_drugs:
-                active_drugs.append(d_name)
+            if d_name:
+                norm_d = normalizer.normalize(d_name).lower().strip()
+                if norm_d not in discontinued_by_order:
+                    all_active_meds.append(d_name)
 
-        if not active_drugs:
+        # Add active order drugs not discontinued
+        for ord_d in active_order_drugs:
+            norm_ord = normalizer.normalize(ord_d).lower().strip()
+            if norm_ord not in discontinued_by_order:
+                all_active_meds.append(ord_d)
+
+        # Build unique normalized active drugs list
+        active_drugs: List[str] = []
+        seen_active_norm: Set[str] = set()
+        for d in all_active_meds:
+            norm_d = normalizer.normalize(d).lower().strip()
+            if norm_d not in seen_active_norm:
+                seen_active_norm.add(norm_d)
+                active_drugs.append(d)
+
+        if not active_drugs and not all_active_meds:
             return []
 
-        normalizer = self.knowledge_service.normalizer
         findings: List[Finding] = []
         seen_finding_keys: Set[Tuple[str, Tuple[str, ...]]] = set()
         seen_drug_pairs: Set[Tuple[str, ...]] = set()
@@ -278,7 +397,7 @@ class RiskDetector:
                     norm_a = normalizer.normalize(drug_a).lower().strip()
                     norm_b = normalizer.normalize(drug_b).lower().strip()
 
-                    if not norm_a or not norm_b:
+                    if not norm_a or not norm_b or norm_a == norm_b:
                         continue
 
                     interactions = self.knowledge_service.get_interaction_pair(drug_a, drug_b)
@@ -342,7 +461,7 @@ class RiskDetector:
                                 "evidence_id": evidence.evidence_id,
                                 "source": evidence.source,
                                 "source_version": evidence.source_version,
-                                "matched_pair": [norm_a, norm_b],
+                                "matched_pair": sorted([norm_a, norm_b]),
                             },
                             source=evidence.source,
                         )
@@ -431,7 +550,7 @@ class RiskDetector:
 
             # DEMO CASE 2: Enoxaparin with renal-context change
             elif r_id == "AEGIS-DEMO-002-ENOXAPARIN-RENAL" or (
-                r_type == "renal_risk" and drug_a_rule and str(drug_a_rule).lower() == "enoxaparin"
+                r_type == "renal_risk" and (not drug_a_rule or "enoxaparin" in str(drug_a_rule).lower())
             ):
                 has_enoxaparin = any("enoxaparin" in normalizer.normalize(d).lower() for d in active_drugs)
                 if has_enoxaparin:
@@ -489,11 +608,72 @@ class RiskDetector:
                     )
                     findings.append(finding)
 
+            elif r_type == "renal_risk" and drug_a_rule:
+                norm_rule_drug = normalizer.normalize(str(drug_a_rule)).lower().strip()
+                has_drug = any(norm_rule_drug in normalizer.normalize(d).lower() for d in active_drugs)
+                if has_drug:
+                    sig = (str(r_id), (norm_rule_drug,))
+                    if sig in seen_finding_keys:
+                        continue
+                    seen_finding_keys.add(sig)
+
+                    renal_trend = self._analyze_lab_trend(
+                        clean_labs, ["creatinine", "egfr", "crcl", "bun", "renal"]
+                    )
+                    inputs = {
+                        "drug_a": norm_rule_drug,
+                        "patient_id": patient_id,
+                        "lab_count": len(clean_labs),
+                    }
+                    if renal_trend["status"] == "missing":
+                        inputs["renal_context"] = "missing"
+                        inputs["data_needed"] = ["eGFR", "creatinine"]
+                        desc = (
+                            f"{ev_text or 'Renal safety rule triggered.'}\n\nClinical Context: Missing baseline renal function panel (eGFR/Creatinine). "
+                            "Clinical renal evaluation required."
+                        )
+                        act = "Renal function assessment and clinical dose evaluation required."
+                    else:
+                        renal_status = "declining" if renal_trend["trend"] == "rising" else renal_trend["trend"]
+                        inputs["renal_context"] = renal_status
+                        inputs["latest_renal_lab"] = renal_trend["latest_value"]
+                        inputs["latest_test_name"] = renal_trend.get("test_name", "renal lab")
+                        inputs["renal_history"] = renal_trend["history"]
+                        desc = (
+                            f"{ev_text or 'Renal safety rule evaluated.'}\n\nClinical Context: Renal function panel evaluated "
+                            f"(latest {renal_trend.get('test_name', 'renal lab')}: {renal_trend['latest_value']}, "
+                            f"trend: {renal_status} across {renal_trend['labs_count']} lab(s))."
+                        )
+                        act = action or "review/hold/monitor; evaluate dose adjustment"
+
+                    finding = Finding(
+                        rule_id=str(r_id),
+                        severity=severity or "review_required",
+                        title=f"Renal Risk Alert: {norm_rule_drug} with renal context",
+                        description=desc,
+                        action=act,
+                        inputs=inputs,
+                        trace={
+                            "rule_id": str(r_id),
+                            "evidence_id": str(ev_id),
+                            "source": str(source),
+                            "source_version": str(source_ver),
+                            "matched_pair": [norm_rule_drug],
+                        },
+                        source=str(source),
+                    )
+                    findings.append(finding)
+
             # DEMO CASE 3: Duplicate ACE-inhibitor therapy
             elif r_id == "AEGIS-DEMO-003-DUPLICATE-ACE-INHIBITOR" or (
-                r_type == "duplicate_therapy" and str(drug_a_rule).lower() == "ace inhibitor"
+                r_type == "duplicate_therapy"
+                and (
+                    not drug_a_rule
+                    or str(drug_a_rule).lower() in {"ace inhibitor", "ace-inhibitor", "ace_inhibitor"}
+                    or str(drug_b_rule).lower() in {"ace inhibitor", "ace-inhibitor", "ace_inhibitor"}
+                )
             ):
-                active_aces = [d for d in active_drugs if self._is_ace_inhibitor(d)]
+                active_aces = [d for d in all_active_meds if self._is_ace_inhibitor(d)]
                 if len(active_aces) >= 2:
                     sig = (str(r_id), tuple(sorted(str(a).lower() for a in active_aces[:2])))
                     if sig in seen_finding_keys:
@@ -532,6 +712,53 @@ class RiskDetector:
                     )
                     findings.append(finding)
 
+            elif r_type == "duplicate_therapy" and drug_a_rule:
+                norm_rule_drug = normalizer.normalize(str(drug_a_rule)).lower().strip()
+                matches = [
+                    d for d in all_active_meds
+                    if normalizer.normalize(d).lower().strip() == norm_rule_drug
+                ]
+                if len(matches) >= 2:
+                    sig = (str(r_id), (norm_rule_drug,))
+                    if sig in seen_finding_keys:
+                        continue
+                    seen_finding_keys.add(sig)
+
+                    inputs = {
+                        "drug_a": matches[0],
+                        "drug_b": matches[1],
+                        "duplicate_drug": norm_rule_drug,
+                        "active_duplicates": matches,
+                        "patient_id": patient_id,
+                        "lab_count": len(clean_labs),
+                    }
+                    desc = (
+                        f"{ev_text or 'Duplicate medication therapy detected.'}\n\nClinical Context: Multiple active orders/prescriptions detected "
+                        f"for {norm_rule_drug} ({', '.join(matches)})."
+                    )
+                    act = action or "duplicate therapy review"
+
+                    finding = Finding(
+                        rule_id=str(r_id),
+                        severity=severity or "review_required",
+                        title=f"Duplicate Therapy: {matches[0]} + {matches[1]}",
+                        description=desc,
+                        action=act,
+                        inputs=inputs,
+                        trace={
+                            "rule_id": str(r_id),
+                            "evidence_id": str(ev_id),
+                            "source": str(source),
+                            "source_version": str(source_ver),
+                            "matched_pair": [norm_rule_drug],
+                        },
+                        source=str(source),
+                    )
+                    findings.append(finding)
+
+        if filter_unchanged and previous_findings:
+            findings = self.filter_unchanged_findings(findings, previous_findings)
+
         return findings
 
     def evaluate(
@@ -542,6 +769,7 @@ class RiskDetector:
         orders: Optional[List[Any]] = None,
         previous_findings: Optional[List[Any]] = None,
         rule_context: Optional[Any] = None,
+        filter_unchanged: bool = False,
     ) -> RiskAssessmentReport:
         """
         Run detection and package results into a RiskAssessmentReport.
@@ -557,6 +785,7 @@ class RiskDetector:
             orders=orders,
             previous_findings=previous_findings,
             rule_context=rule_context,
+            filter_unchanged=filter_unchanged,
         )
         patient_id = self._extract_patient_id(ctx)
 
