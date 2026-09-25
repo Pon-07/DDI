@@ -23,6 +23,11 @@ class SafetyRule(BaseModel):
         max_length=50,
         description="Type of safety rule (e.g., drug_interaction, contraindication, label_warning)",
     )
+    category: Optional[str] = Field(
+        None,
+        max_length=100,
+        description="Rule category (e.g., drug_drug_interaction, renal_risk, duplicate_therapy)",
+    )
     drug_a: str = Field(
         ...,
         min_length=1,

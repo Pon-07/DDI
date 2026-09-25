@@ -161,8 +161,9 @@ class TestIngestOpenFDAScript(unittest.TestCase):
 
     def test_cli_main_verify_only(self):
         """Test CLI --verify-only execution flag."""
-        exit_code = main(["--verify-only"])
-        self.assertEqual(exit_code, 0)
+        with patch("scripts.ingest_openfda.SessionLocal", return_value=self.session):
+            exit_code = main(["--verify-only"])
+            self.assertEqual(exit_code, 0)
 
     def test_cli_main_custom_input_dir(self):
         """Test CLI execution pointing to custom directory."""
@@ -174,6 +175,7 @@ class TestIngestOpenFDAScript(unittest.TestCase):
                 "openFDA_normalized_part*.json",
                 "--batch-size",
                 "10",
+                "--skip-prevalidation",
             ])
             self.assertEqual(exit_code, 0)
 

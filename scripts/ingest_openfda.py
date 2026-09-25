@@ -9,6 +9,11 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from agents.knowledge.dataset_validator import (
+    DatasetValidationError,
+    print_validation_summary,
+    validate_dataset,
+)
 from agents.knowledge.openfda_adapter import (
     IngestionResult,
     OpenFDAIngestionAdapter,
@@ -85,6 +90,7 @@ def run_ingestion(
     source_name: str = "openfda",
     source_version: Optional[str] = "2026.1",
     db_session: Optional[Any] = None,
+    enforce_prevalidation: bool = False,
 ) -> IngestionResult:
     """
     Execute OpenFDA evidence ingestion from partitioned JSON files into SQLite database.
@@ -97,6 +103,7 @@ def run_ingestion(
         source_name: Source provenance name (default: "openfda").
         source_version: Source provenance version (default: "2026.1").
         db_session: Optional SQLAlchemy Session.
+        enforce_prevalidation: When True, abort before any writes if validation fails.
 
     Returns:
         IngestionResult: Summary metrics of ingestion.
@@ -105,13 +112,24 @@ def run_ingestion(
     if not path.exists():
         raise FileNotFoundError(f"OpenFDA dataset input path does not exist: {path}")
 
-    # Ensure SQLite tables exist idempotently
-    Base.metadata.create_all(bind=engine)
+    if enforce_prevalidation:
+        validation = validate_dataset(
+            path,
+            dataset_kind="openfda",
+            source_name=source_name,
+            source_version=source_version,
+            file_pattern=file_pattern,
+        )
+        if not validation.passed:
+            raise DatasetValidationError(validation)
 
     session = db_session or SessionLocal()
     close_session = db_session is None
 
     try:
+        # Ensure SQLite tables exist idempotently on the target session engine
+        target_engine = session.get_bind() if hasattr(session, "get_bind") else engine
+        Base.metadata.create_all(bind=target_engine)
         adapter = OpenFDAIngestionAdapter(
             db_session=session,
             source_name=source_name,
@@ -172,6 +190,16 @@ def main(argv: Optional[list] = None) -> int:
         action="store_true",
         help="Skip database verification after ingestion",
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Run pre-ingestion dataset validation only (does not write to the database)",
+    )
+    parser.add_argument(
+        "--skip-prevalidation",
+        action="store_true",
+        help="Skip the pre-ingestion dataset validation gate",
+    )
 
     args = parser.parse_args(argv)
 
@@ -179,6 +207,24 @@ def main(argv: Optional[list] = None) -> int:
         counts = verify_database()
         print_verification_summary(counts)
         return 0
+
+    if args.validate_only or not args.skip_prevalidation:
+        validation = validate_dataset(
+            args.input_dir,
+            dataset_kind="openfda",
+            source_name="openfda",
+            source_version=args.source_version,
+            file_pattern=args.pattern,
+        )
+        print_validation_summary(validation)
+        if args.validate_only:
+            return 0 if validation.passed else 1
+        if not validation.passed:
+            print(
+                "\n[ERROR] Ingestion aborted: dataset validation failed.",
+                file=sys.stderr,
+            )
+            return 1
 
     print(f"Starting OpenFDA evidence ingestion from: {args.input_dir}")
     print(f"Discovery pattern: {args.pattern} | Batch size: {args.batch_size}")
@@ -190,7 +236,12 @@ def main(argv: Optional[list] = None) -> int:
             batch_size=args.batch_size,
             file_pattern=args.pattern,
             source_version=args.source_version,
+            enforce_prevalidation=False,
         )
+    except DatasetValidationError as e:
+        print_validation_summary(e.result)
+        print(f"\n[ERROR] Ingestion aborted: {e}", file=sys.stderr)
+        return 1
     except Exception as e:
         print(f"\n[ERROR] Ingestion failed: {e}", file=sys.stderr)
         return 1

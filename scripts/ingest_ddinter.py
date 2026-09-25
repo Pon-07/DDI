@@ -9,6 +9,11 @@ project_root = Path(__file__).resolve().parent.parent
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+from agents.knowledge.dataset_validator import (
+    DatasetValidationError,
+    print_validation_summary,
+    validate_dataset,
+)
 from agents.knowledge.ddinter_adapter import (
     DDInterIngestionAdapter,
     DDInterIngestionResult,
@@ -91,6 +96,7 @@ def run_ingestion(
     source_name: str = "ddinter",
     source_version: Optional[str] = "2026.1",
     db_session: Optional[Any] = None,
+    enforce_prevalidation: bool = False,
 ) -> DDInterIngestionResult:
     """
     Execute DDInter interaction evidence ingestion from JSON file/directory into SQLite database.
@@ -103,6 +109,7 @@ def run_ingestion(
         source_name: Source provenance name (default: "ddinter").
         source_version: Source provenance version (default: "2026.1").
         db_session: Optional SQLAlchemy Session.
+        enforce_prevalidation: When True, abort before any writes if validation fails.
 
     Returns:
         DDInterIngestionResult: Summary metrics of ingestion.
@@ -111,13 +118,24 @@ def run_ingestion(
     if not path.exists():
         raise FileNotFoundError(f"DDInter dataset input path does not exist: {path}")
 
-    # Ensure SQLite tables exist idempotently
-    Base.metadata.create_all(bind=engine)
+    if enforce_prevalidation:
+        validation = validate_dataset(
+            path,
+            dataset_kind="ddinter",
+            source_name=source_name,
+            source_version=source_version,
+            file_pattern=file_pattern,
+        )
+        if not validation.passed:
+            raise DatasetValidationError(validation)
 
     session = db_session or SessionLocal()
     close_session = db_session is None
 
     try:
+        # Ensure SQLite tables exist idempotently on the target session engine
+        target_engine = session.get_bind() if hasattr(session, "get_bind") else engine
+        Base.metadata.create_all(bind=target_engine)
         adapter = DDInterIngestionAdapter(
             db_session=session,
             source_name=source_name,
@@ -178,6 +196,16 @@ def main(argv: Optional[list] = None) -> int:
         action="store_true",
         help="Skip database verification after ingestion",
     )
+    parser.add_argument(
+        "--validate-only",
+        action="store_true",
+        help="Run pre-ingestion dataset validation only (does not write to the database)",
+    )
+    parser.add_argument(
+        "--skip-prevalidation",
+        action="store_true",
+        help="Skip the pre-ingestion dataset validation gate",
+    )
 
     args = parser.parse_args(argv)
 
@@ -185,6 +213,24 @@ def main(argv: Optional[list] = None) -> int:
         counts = verify_database()
         print_verification_summary(counts)
         return 0
+
+    if args.validate_only or not args.skip_prevalidation:
+        validation = validate_dataset(
+            args.input_path,
+            dataset_kind="ddinter",
+            source_name="ddinter",
+            source_version=args.source_version,
+            file_pattern=args.pattern,
+        )
+        print_validation_summary(validation)
+        if args.validate_only:
+            return 0 if validation.passed else 1
+        if not validation.passed:
+            print(
+                "\n[ERROR] Ingestion aborted: dataset validation failed.",
+                file=sys.stderr,
+            )
+            return 1
 
     print(f"Starting DDInter interaction evidence ingestion from: {args.input_path}")
     print(f"Batch size: {args.batch_size} | Source version: {args.source_version}")
@@ -196,7 +242,12 @@ def main(argv: Optional[list] = None) -> int:
             batch_size=args.batch_size,
             file_pattern=args.pattern,
             source_version=args.source_version,
+            enforce_prevalidation=False,
         )
+    except DatasetValidationError as e:
+        print_validation_summary(e.result)
+        print(f"\n[ERROR] Ingestion aborted: {e}", file=sys.stderr)
+        return 1
     except Exception as e:
         print(f"\n[ERROR] Ingestion failed: {e}", file=sys.stderr)
         return 1

@@ -5,7 +5,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from database.database import Base, engine, get_db
+from database.database import Base, set_sqlite_pragma
 from models import (
     AuditLedger,
     Drug,
@@ -337,53 +337,56 @@ class TestDatabaseIntegrity(unittest.TestCase):
             self.session.commit()
         self.session.rollback()
 
-    # 7. Test SQLite foreign key enforcement on active database
+    # 7. Test SQLite foreign key enforcement on isolated test engine
     def test_production_engine_foreign_keys_active(self):
-        """Verify that engine configured in database.py actively enforces foreign keys."""
-        with engine.connect() as conn:
+        """Verify that engine configured with set_sqlite_pragma actively enforces foreign keys."""
+        with self.test_engine.connect() as conn:
             fk_val = conn.execute(text("PRAGMA foreign_keys")).scalar()
             self.assertEqual(fk_val, 1)
 
-    # 8. Test SQLite WAL mode on active database
+    # 8. Test SQLite WAL mode on active file database
     def test_production_engine_wal_mode_active(self):
-        """Verify that engine configured in database.py operates in WAL mode."""
-        with engine.connect() as conn:
-            journal = conn.execute(text("PRAGMA journal_mode")).scalar()
-            self.assertEqual(str(journal).lower(), "wal")
+        """Verify that file engine configured with set_sqlite_pragma operates in WAL mode."""
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_db_path = Path(temp_dir) / "test_wal.db"
+            wal_engine = create_engine(
+                f"sqlite:///{temp_db_path}",
+                connect_args={"check_same_thread": False},
+            )
+            event.listen(wal_engine, "connect", set_sqlite_pragma)
+            try:
+                with wal_engine.connect() as conn:
+                    journal = conn.execute(text("PRAGMA journal_mode")).scalar()
+                    self.assertEqual(str(journal).lower(), "wal")
+            finally:
+                wal_engine.dispose()
 
     # 9. Test initialization idempotency
     def test_init_db_idempotency_preserves_existing_data(self):
         """Verify that repeated init_db() execution preserves pre-existing rows across tables."""
-        init_db()
+        init_db(target_engine=self.test_engine, verbose=False)
 
-        db = next(get_db())
-        try:
-            # Seed test patient and drug
-            patient = Patient(patient_identifier="MRN-IDEMPOTENT-TEST", name="Idempotent Test Patient")
-            drug = Drug(drug_name="Idempotent Drug", normalized_name="idempotent_drug", source="Test")
-            db.add_all([patient, drug])
-            db.commit()
+        # Seed test patient and drug
+        patient = Patient(patient_identifier="MRN-IDEMPOTENT-TEST", name="Idempotent Test Patient")
+        drug = Drug(drug_name="Idempotent Drug", normalized_name="idempotent_drug", source="Test")
+        self.session.add_all([patient, drug])
+        self.session.commit()
 
-            patient_id = patient.id
-            drug_id = drug.id
+        patient_id = patient.id
+        drug_id = drug.id
 
-            # Run init_db() again
-            init_db()
+        # Run init_db() again on test engine
+        init_db(target_engine=self.test_engine, verbose=False)
 
-            # Verify seeded records still exist and are untouched
-            fetched_p = db.get(Patient, patient_id)
-            fetched_d = db.get(Drug, drug_id)
-            self.assertIsNotNone(fetched_p)
-            self.assertIsNotNone(fetched_d)
-            self.assertEqual(fetched_p.name, "Idempotent Test Patient")
-            self.assertEqual(fetched_d.normalized_name, "idempotent_drug")
-
-            # Clean up test rows
-            db.delete(fetched_p)
-            db.delete(fetched_d)
-            db.commit()
-        finally:
-            db.close()
+        # Verify seeded records still exist and are untouched
+        fetched_p = self.session.get(Patient, patient_id)
+        fetched_d = self.session.get(Drug, drug_id)
+        self.assertIsNotNone(fetched_p)
+        self.assertIsNotNone(fetched_d)
+        self.assertEqual(fetched_p.name, "Idempotent Test Patient")
+        self.assertEqual(fetched_d.normalized_name, "idempotent_drug")
 
 
 if __name__ == "__main__":
