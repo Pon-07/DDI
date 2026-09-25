@@ -210,7 +210,8 @@ class RiskDetector:
                 rules.extend(ctx)
             elif isinstance(ctx, dict):
                 rules.extend(ctx.values())
-        else:
+
+        if not rules:
             rules.extend(self._demo_rules)
 
         # Deduplicate rules by rule_id

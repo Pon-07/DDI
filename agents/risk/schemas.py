@@ -1,6 +1,6 @@
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Finding(BaseModel):
@@ -32,6 +32,7 @@ class Finding(BaseModel):
     description: str = Field(
         ...,
         min_length=1,
+        max_length=2000,
         description="Detailed description of the interaction or contraindication from evidence",
     )
     action: Optional[str] = Field(
@@ -52,6 +53,33 @@ class Finding(BaseModel):
         max_length=100,
         description="Originating knowledge source (e.g. DDInter, openFDA, DailyMed)",
     )
+    source_version: Optional[str] = Field(
+        None,
+        description="Version string of the evidence or rule source",
+    )
+    evidence_id: Optional[str] = Field(
+        None,
+        description="External evidence identifier if applicable",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def populate_provenance_from_trace(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            trace = data.get("trace")
+            if isinstance(trace, dict):
+                if data.get("evidence_id") is None and trace.get("evidence_id") is not None:
+                    data["evidence_id"] = str(trace["evidence_id"])
+                if data.get("source_version") is None and trace.get("source_version") is not None:
+                    data["source_version"] = str(trace["source_version"])
+        return data
+
+    @property
+    def is_demo_rule(self) -> bool:
+        """Deterministically distinguish prototype demo rules from external validated evidence."""
+        src = (self.source or "").upper()
+        rid = (self.rule_id or "").upper()
+        return "DEMO" in src or "DEMO" in rid or "AEGIS_HACKATHON" in src
 
 
 class RiskAssessmentReport(BaseModel):

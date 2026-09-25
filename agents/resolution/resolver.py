@@ -1,3 +1,4 @@
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
@@ -126,6 +127,17 @@ class SafetyResolutionEngine:
             elif drug_a and not drug_b:
                 single_key = str(drug_a).lower().strip()
                 self._rules_by_drug.setdefault(single_key, []).append(rule)
+
+    def get_active_rules(self) -> List[Any]:
+        """Return unique active loaded safety rules."""
+        seen = set()
+        unique_rules = []
+        for r in self._rules_by_id.values():
+            rid = getattr(r, "rule_id", None) or (r.get("rule_id") if isinstance(r, dict) else None)
+            if rid and rid not in seen:
+                seen.add(rid)
+                unique_rules.append(r)
+        return unique_rules
 
     def _extract_finding_attr(self, finding: Any, attr: str, default: Any = None) -> Any:
         if finding is None:
@@ -674,8 +686,9 @@ class SafetyResolutionEngine:
 
         # 5. Generate deterministic simulation_id
         raw_key = f"{candidate.finding_id}_{candidate.action_type}_{candidate.description[:20]}"
-        hash_suffix = abs(hash(raw_key)) % 1000000
+        hash_suffix = int(hashlib.sha256(raw_key.encode("utf-8")).hexdigest()[:8], 16) % 1000000
         sim_id = f"SIM-ORD-{candidate.finding_id}-{hash_suffix:06d}"
+        resolution_id = f"RES-{candidate.finding_id}-{candidate.action_type}"
 
         return SimulatedOrder(
             simulation_id=sim_id,
@@ -698,6 +711,7 @@ class SafetyResolutionEngine:
             rule_id=str(order_rule_id) if order_rule_id else None,
             source_version=str(order_source_version) if order_source_version else None,
             evidence_id=str(order_evidence_id) if order_evidence_id else None,
+            resolution_id=resolution_id,
         )
 
     def _prepare_finding_for_explication(
@@ -718,6 +732,15 @@ class SafetyResolutionEngine:
             or self._extract_finding_attr(finding, "evidence_id")
         )
         source = self._extract_finding_attr(finding, "source") or "Unknown"
+        rule_id = (
+            self._extract_finding_attr(finding, "rule_id")
+            or (trace.get("rule_id") if isinstance(trace, dict) else None)
+            or "UNKNOWN_RULE"
+        )
+        source_version = (
+            (trace.get("source_version") if isinstance(trace, dict) else None)
+            or self._extract_finding_attr(finding, "source_version")
+        )
 
         if ranked_candidates and res_result.status == "actionable":
             top_cand = ranked_candidates[0]
@@ -727,10 +750,14 @@ class SafetyResolutionEngine:
                 evidence_id = top_cand.evidence_id
             if top_cand.source:
                 source = top_cand.source
+            if top_cand.source_version:
+                source_version = top_cand.source_version
+            if top_cand.rule_id:
+                rule_id = top_cand.rule_id
 
         return {
             "id": self._extract_finding_attr(finding, "id"),
-            "rule_id": self._extract_finding_attr(finding, "rule_id") or "UNKNOWN_RULE",
+            "rule_id": rule_id,
             "severity": self._extract_finding_attr(finding, "severity") or "undetermined",
             "title": self._extract_finding_attr(finding, "title") or "Medication Safety Finding",
             "description": self._extract_finding_attr(finding, "description") or "Reported safety finding.",
@@ -738,6 +765,7 @@ class SafetyResolutionEngine:
             "inputs": inputs,
             "trace": trace,
             "source": source,
+            "source_version": source_version,
             "evidence_id": evidence_id,
         }
 
@@ -805,6 +833,34 @@ class SafetyResolutionEngine:
             explanation = self.explicator.explicate(enriched_finding)
 
         # 6. Optional Audit Ledger integration
+        trace = self._extract_finding_attr(finding, "trace", {}) or {}
+        rule_id = (
+            self._extract_finding_attr(finding, "rule_id")
+            or (trace.get("rule_id") if isinstance(trace, dict) else None)
+        )
+        source = (
+            self._extract_finding_attr(finding, "source")
+            or (trace.get("source") if isinstance(trace, dict) else None)
+        )
+        source_version = (
+            self._extract_finding_attr(finding, "source_version")
+            or (trace.get("source_version") if isinstance(trace, dict) else None)
+        )
+        evidence_id = (
+            self._extract_finding_attr(finding, "evidence_id")
+            or (trace.get("evidence_id") if isinstance(trace, dict) else None)
+        )
+        if ranked_candidates:
+            top_cand = ranked_candidates[0]
+            if not rule_id:
+                rule_id = top_cand.rule_id
+            if not source:
+                source = top_cand.source
+            if not source_version:
+                source_version = top_cand.source_version
+            if not evidence_id:
+                evidence_id = top_cand.evidence_id
+
         if self.audit_ledger is not None:
             # Audit resolution evaluation
             self.audit_ledger.append_event(
@@ -812,6 +868,10 @@ class SafetyResolutionEngine:
                 event_type="SAFETY_RESOLUTION_EVALUATED",
                 payload={
                     "finding_id": finding_id,
+                    "rule_id": str(rule_id) if rule_id else None,
+                    "source": str(source) if source else None,
+                    "source_version": str(source_version) if source_version else None,
+                    "evidence_id": str(evidence_id) if evidence_id else None,
                     "severity": severity,
                     "status": pipeline_status,
                     "candidates_count": len(ranked_candidates),
@@ -827,7 +887,9 @@ class SafetyResolutionEngine:
                     event_type="EXPLANATION_GENERATED",
                     payload={
                         "finding_id": finding_id,
+                        "rule_id": getattr(explanation, "rule_id", None) or (str(rule_id) if rule_id else None),
                         "evidence_source": explanation.evidence_source,
+                        "source_version": getattr(explanation, "source_version", None) or (str(source_version) if source_version else None),
                         "evidence_id": explanation.evidence_id,
                         "is_fallback": explanation.is_fallback,
                         "is_llm_enhanced": getattr(explanation, "is_llm_enhanced", False),
@@ -843,7 +905,12 @@ class SafetyResolutionEngine:
                     event_type="SIMULATED_ORDER_CREATED",
                     payload={
                         "simulation_id": simulated_order.simulation_id,
+                        "resolution_id": simulated_order.resolution_id,
                         "finding_id": simulated_order.finding_id,
+                        "rule_id": simulated_order.rule_id,
+                        "evidence_id": simulated_order.evidence_id,
+                        "source": simulated_order.source,
+                        "source_version": simulated_order.source_version,
                         "patient_id": simulated_order.patient_id,
                         "medication_id": simulated_order.medication_id,
                         "drug_name": simulated_order.drug_name,
@@ -867,6 +934,10 @@ class SafetyResolutionEngine:
             explanation=explanation,
             requires_cosign=True,
             review_reason=review_reason,
+            rule_id=str(rule_id) if rule_id else None,
+            source=str(source) if source else None,
+            source_version=str(source_version) if source_version else None,
+            evidence_id=str(evidence_id) if evidence_id else None,
         )
 
     def resolve_findings_pipeline(

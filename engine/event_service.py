@@ -86,6 +86,16 @@ class MedicationEventService:
             )
             db.add(event_record)
 
+            if self.audit_ledger:
+                self.audit_ledger.append_event(
+                    actor="event_service",
+                    event_type="PATIENT_EVENT_INGESTED",
+                    payload={
+                        "patient_id": patient_id,
+                        "event_type": event_type,
+                    },
+                )
+
             # 2. Ingest Lab from event if present
             if "test_name" in payload_data and "value" in payload_data:
                 lab_record = Lab(
@@ -256,6 +266,7 @@ class MedicationEventService:
                             "severity": f.severity,
                             "title": f.title,
                             "source": trace_dict.get("source", "Unknown"),
+                            "source_version": trace_dict.get("source_version"),
                             "evidence_id": trace_dict.get("evidence_id"),
                         },
                     )
@@ -271,6 +282,7 @@ class MedicationEventService:
                             "severity": f.severity,
                             "title": f.title,
                             "source": trace_dict.get("source", "Unknown"),
+                            "source_version": trace_dict.get("source_version"),
                             "evidence_id": trace_dict.get("evidence_id"),
                         },
                     )
