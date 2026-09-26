@@ -60,6 +60,21 @@ def init_db(target_engine: Optional[Any] = None, verbose: bool = True) -> None:
             conn.execute(text("ALTER TABLE interaction_evidence ADD COLUMN severity VARCHAR(50)"))
             conn.execute(text("CREATE INDEX IF NOT EXISTS ix_interaction_evidence_severity ON interaction_evidence(severity)"))
 
+        user_cols = [
+            row[1]
+            for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()
+        ]
+        if user_cols:
+            if "totp_secret" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64)"))
+            if "totp_enabled" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN DEFAULT 0"))
+            if "totp_last_verified_at" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_last_verified_at DATETIME"))
+            if "totp_last_timestep" not in user_cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_last_timestep INTEGER"))
+
+
     # Query SQLite database metadata for verification
     with eng.connect() as conn:
         journal_mode = conn.execute(text("PRAGMA journal_mode")).scalar()

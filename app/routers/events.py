@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_event_service
 from app.schemas import EventSubmissionRequest, EventSubmissionResponse
 from database.database import get_db
+from engine.drug_service import is_medication_recognized
 from engine.event_service import MedicationEventService
 from models import Patient
 
@@ -32,6 +33,16 @@ def submit_event(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Patient with ID {payload.patient_id} not found.",
         )
+
+    # Validate drug name if a medication prescription event is submitted
+    payload_dict = payload.payload or {}
+    med_name = payload.new_medication_name or payload_dict.get("drug_name") or payload_dict.get("medication_name")
+    if (payload.event_type in ("MEDICATION_PRESCRIBED", "MEDICATION_ORDERED") or payload.new_medication_name) and med_name:
+        if not is_medication_recognized(db, str(med_name)):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Medication '{med_name}' not recognized in the local medication knowledge base.",
+            )
 
     try:
         affected_findings, pipeline_results = event_service.process_event_with_resolutions(
