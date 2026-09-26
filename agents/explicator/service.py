@@ -58,6 +58,11 @@ class ExplicatorService:
             return finding.model_dump()
 
         # ORM model or other object
+        trace_dict = getattr(finding, "trace", {}) or {}
+        source_val = getattr(finding, "source", None)
+        if (not source_val or source_val == "Unknown") and isinstance(trace_dict, dict):
+            source_val = trace_dict.get("source")
+
         return {
             "id": getattr(finding, "id", None),
             "rule_id": getattr(finding, "rule_id", "UNKNOWN_RULE"),
@@ -66,8 +71,8 @@ class ExplicatorService:
             "description": getattr(finding, "description", "Reported safety finding."),
             "action": getattr(finding, "action", None),
             "inputs": getattr(finding, "inputs", {}) or {},
-            "trace": getattr(finding, "trace", {}) or {},
-            "source": getattr(finding, "source", "Unknown"),
+            "trace": trace_dict,
+            "source": source_val or "Unknown",
         }
 
     def explicate(self, finding: Union[Finding, Dict[str, Any], Any]) -> ExplanationReport:
@@ -87,10 +92,13 @@ class ExplicatorService:
         description = finding_data.get("description", "Safety finding detected.")
         severity = finding_data.get("severity", "undetermined")
         action = finding_data.get("action")
-        source = finding_data.get("source") or "Unknown"
-
         inputs = finding_data.get("inputs", {}) or {}
         trace = finding_data.get("trace", {}) or {}
+        source = (
+            finding_data.get("source")
+            if (finding_data.get("source") and finding_data.get("source") != "Unknown")
+            else ((trace.get("source") if isinstance(trace, dict) else None) or "Unknown")
+        )
 
         # Extract involved medications
         medications: List[str] = []
