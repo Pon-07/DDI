@@ -6,6 +6,8 @@ from sqlalchemy.orm import Session
 from app.dependencies import get_audit_ledger, get_resolution_engine
 from app.routers import (
     audit,
+    auth,
+    dashboards,
     demo,
     events,
     findings,
@@ -14,9 +16,30 @@ from app.routers import (
     orders,
     patients,
     simulated_orders,
+    web_app,
 )
 from app.schemas import SystemStatusResponse
-from database.database import get_db
+from database.database import engine, get_db
+from engine.auth.models import AuthBase
+
+# Initialize auth tables idempotently
+AuthBase.metadata.create_all(bind=engine)
+
+with engine.begin() as conn:
+    cols = [
+        row[1]
+        for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()
+    ]
+    if cols:
+        if "totp_secret" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64)"))
+        if "totp_enabled" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN DEFAULT 0"))
+        if "totp_last_verified_at" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN totp_last_verified_at DATETIME"))
+        if "totp_last_timestep" not in cols:
+            conn.execute(text("ALTER TABLE users ADD COLUMN totp_last_timestep INTEGER"))
+
 
 app = FastAPI(
     title="AEGIS Rx",
@@ -24,6 +47,9 @@ app = FastAPI(
     version="0.1.0",
 )
 
+app.include_router(auth.router)
+app.include_router(dashboards.router)
+app.include_router(web_app.router)
 app.include_router(patients.router)
 app.include_router(medications.router)
 app.include_router(labs.router)

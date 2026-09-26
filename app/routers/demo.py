@@ -244,7 +244,7 @@ def get_demo_html():
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>AEGIS Rx — Offline Medication Safety Platform Demo</title>
+  <title>MICROMEDX — Offline Medication Safety Platform Demo</title>
   <style>
     :root {
       --bg: #0f172a;
