@@ -3,7 +3,19 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from app.routers import labs, medications, orders, patients
+from app.dependencies import get_audit_ledger, get_resolution_engine
+from app.routers import (
+    audit,
+    demo,
+    events,
+    findings,
+    labs,
+    medications,
+    orders,
+    patients,
+    simulated_orders,
+)
+from app.schemas import SystemStatusResponse
 from database.database import get_db
 
 app = FastAPI(
@@ -16,10 +28,11 @@ app.include_router(patients.router)
 app.include_router(medications.router)
 app.include_router(labs.router)
 app.include_router(orders.router)
-
-
-
-
+app.include_router(events.router)
+app.include_router(findings.router)
+app.include_router(simulated_orders.router)
+app.include_router(audit.router)
+app.include_router(demo.router)
 
 
 @app.get("/")
@@ -29,12 +42,45 @@ def read_root():
         "description": "Offline Medication Safety Platform",
         "version": "0.1.0",
         "status": "online",
+        "mode": "offline-capable",
     }
 
 
 @app.get("/health")
 def health_check():
     return {"status": "ok"}
+
+
+@app.get("/status", response_model=SystemStatusResponse)
+@app.get("/health/status", response_model=SystemStatusResponse)
+def get_system_status(
+    db: Session = Depends(get_db),
+    resolution_engine=Depends(get_resolution_engine),
+    audit_ledger=Depends(get_audit_ledger),
+):
+    # Check DB
+    try:
+        db_res = db.execute(text("SELECT 1")).scalar()
+        db_status = "connected" if db_res == 1 else "error"
+    except Exception:
+        db_status = "error"
+
+    # Active rules
+    active_rules = resolution_engine.get_active_rules() if hasattr(resolution_engine, "get_active_rules") else []
+
+    # Audit chain
+    verification = audit_ledger.verify_chain()
+
+    return SystemStatusResponse(
+        status="ok",
+        offline_capable=True,
+        database=db_status,
+        rule_pack="aegis_hackathon_demo",
+        active_rules_count=len(active_rules),
+        ollama_available=False,
+        audit_chain_valid=verification.is_valid,
+        total_audit_records=verification.total_records,
+    )
 
 
 @app.get("/health/db")
