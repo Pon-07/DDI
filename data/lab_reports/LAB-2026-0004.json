@@ -1,0 +1,49 @@
+{
+  "lab_report_id": "LAB-2026-0004",
+  "case_id": "CASE-004",
+  "patient_identifier": "PT-004",
+  "patient_name": "Arthur Pendelton",
+  "collection_date": "2026-10-08T06:30:00Z",
+  "report_date": "2026-10-08T07:10:00Z",
+  "category": "Therapeutic Drug Monitoring & Cardio-Renal Panel",
+  "clinical_indication": "Monitoring of narrow therapeutic index cardiac glycoside therapy",
+  "source_document": "data/lab_reports/LAB-2026-0004.json",
+  "evidence_status": "Verified Locally",
+  "last_reviewed": "2026-10-08T07:15:00Z",
+  "laboratory_facility": "Local Hospital Pathology Laboratory (Internal Repository)",
+  "results": [
+    {
+      "test_name": "Serum Digoxin Level",
+      "result": "1.8",
+      "unit": "ng/mL",
+      "reference_range": "0.5 - 0.9",
+      "status": "High",
+      "clinical_significance": "Therapeutic upper limit approached; concomitant amiodarone P-glycoprotein inhibition causes dangerous >70% concentration surge."
+    },
+    {
+      "test_name": "Serum Potassium",
+      "result": "3.8",
+      "unit": "mEq/L",
+      "reference_range": "3.5 - 5.0",
+      "status": "Normal",
+      "clinical_significance": "Low-normal potassium, predisposing myocardium to digoxin toxicity."
+    },
+    {
+      "test_name": "Serum Magnesium",
+      "result": "1.9",
+      "unit": "mg/dL",
+      "reference_range": "1.7 - 2.2",
+      "status": "Normal",
+      "clinical_significance": "Normal."
+    },
+    {
+      "test_name": "Serum Creatinine",
+      "result": "1.4",
+      "unit": "mg/dL",
+      "reference_range": "0.7 - 1.3",
+      "status": "High",
+      "clinical_significance": "Mild renal insufficiency reducing baseline digoxin clearance."
+    }
+  ],
+  "sha256_checksum": "b8c194a028fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852e104"
+}

@@ -122,3 +122,15 @@ class TOTPStatusResponse(BaseModel):
     user_found: bool
     user_name: Optional[str] = None
     user_role: Optional[str] = None
+
+
+class RoleSwitchRequest(BaseModel):
+    role: str = Field(..., description="Target role: 'Doctor', 'Nurse', 'Clinical Pharmacist', or 'Administrator'")
+
+
+class PasswordLoginRequest(BaseModel):
+    phone_number: str = Field(..., min_length=5, max_length=50, description="Mobile number / Clinician ID")
+    password: str = Field(..., min_length=1, max_length=128, description="Password")
+    role: Optional[str] = Field(None, description="Optional target role hint")
+
+

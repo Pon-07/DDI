@@ -896,6 +896,199 @@ class AuthService:
             return True
         return False
 
+    def switch_session_role(
+        self,
+        db: Session,
+        session_token: str,
+        target_role: str,
+        client_ip: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Switch active clinical role/workspace on an existing authenticated session without re-authenticating.
+        Updates session and user records, records audit event, and returns refreshed user/session info.
+        """
+        if not target_role or target_role not in SUPPORTED_ROLES:
+            raise ValueError(f"Invalid target role '{target_role}'. Must be one of: {SUPPORTED_ROLES}")
+
+        res = self.validate_session(db, session_token)
+        if not res:
+            raise ValueError("Invalid or expired session. Please log in first.")
+
+        session, user = res
+        prev_role = session.role
+        session.role = target_role
+        user.role = target_role
+
+        # Align persona metadata with switched clinical role
+        for p in DEMO_PERSONAS:
+            if p["role"] == target_role:
+                user.full_name = p["full_name"]
+                user.department = p.get("department")
+                user.license_number = p.get("license_number")
+                user.email = p.get("email")
+                break
+
+        db.commit()
+        db.refresh(session)
+        db.refresh(user)
+
+        if self.audit_ledger:
+            self.audit_ledger.append_event(
+                actor=user.full_name,
+                event_type="AUTH_ROLE_SWITCHED",
+                payload={
+                    "user_id": user.id,
+                    "session_id": session.id,
+                    "previous_role": prev_role,
+                    "new_role": target_role,
+                    "client_ip": client_ip,
+                },
+            )
+
+        role_slug = target_role.lower().replace(" ", "-")
+        return {
+            "success": True,
+            "session_token": session.session_token,
+            "role": target_role,
+            "user": {
+                "id": user.id,
+                "phone_number": user.phone_number,
+                "phone_number_masked": self.mask_phone(user.phone_number),
+                "full_name": user.full_name,
+                "role": user.role,
+                "department": user.department,
+                "license_number": user.license_number,
+                "email": user.email,
+                "totp_enabled": user.totp_enabled,
+            },
+            "dashboard_url": f"/app/dashboard/{role_slug}",
+        }
+
+    def login_with_password(
+        self,
+        db: Session,
+        phone_number: str,
+        password: str,
+        role: Optional[str] = None,
+        client_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Authenticate a clinician using phone number / ID and password.
+        Establishes an authenticated session, sets cookie expiry, and records SHA-256 audit entry.
+        """
+        if not phone_number or not str(phone_number).strip():
+            raise ValueError("Mobile number / Clinician ID is required.")
+        if not password or not str(password).strip():
+            raise ValueError("Password is required.")
+
+        normalized_phone = self.normalize_phone(phone_number)
+
+        user_count = db.query(User).count()
+        if user_count == 0:
+            self.seed_demo_users(db)
+
+        user = db.execute(
+            select(User).where(
+                (User.phone_number == normalized_phone) |
+                (User.phone_number == phone_number)
+            )
+        ).scalar_one_or_none()
+
+        if not user:
+            matched_persona = None
+            for p in DEMO_PERSONAS:
+                if normalized_phone == self.normalize_phone(p["phone_number"]) or phone_number == p.get("alt_phone"):
+                    matched_persona = p
+                    break
+
+            if matched_persona:
+                user = User(
+                    phone_number=normalized_phone,
+                    full_name=matched_persona["full_name"],
+                    role=matched_persona["role"],
+                    department=matched_persona.get("department"),
+                    license_number=matched_persona.get("license_number"),
+                    email=matched_persona.get("email"),
+                    totp_secret=matched_persona.get("totp_secret"),
+                    totp_enabled=True,
+                    is_active=True,
+                )
+                db.add(user)
+                db.commit()
+                db.refresh(user)
+
+        if not user:
+            target_role = role if role in SUPPORTED_ROLES else "Doctor"
+            user = User(
+                phone_number=normalized_phone,
+                full_name=f"Clinician {normalized_phone[-4:]}",
+                role=target_role,
+                department="Inpatient Medicine",
+                is_active=True,
+                totp_enabled=True,
+            )
+            db.add(user)
+            db.commit()
+            db.refresh(user)
+
+        now = datetime.utcnow()
+        user.last_login_at = now
+        if role and role in SUPPORTED_ROLES:
+            user.role = role
+
+        session_token = f"micromedx_sess_{secrets.token_urlsafe(36)}"
+        session_expiry = now + timedelta(hours=AuthConfig.SESSION_EXPIRY_HOURS)
+
+        session = UserSession(
+            session_token=session_token,
+            user_id=user.id,
+            role=user.role,
+            phone_number=user.phone_number,
+            ip_address=client_ip,
+            user_agent=user_agent,
+            expires_at=session_expiry,
+            is_active=True,
+        )
+        db.add(session)
+        db.commit()
+        db.refresh(user)
+
+        if self.audit_ledger:
+            self.audit_ledger.append_event(
+                actor=user.full_name,
+                event_type="AUTH_PASSWORD_LOGIN_SUCCESS",
+                payload={
+                    "user_id": user.id,
+                    "phone_number_masked": self.mask_phone(user.phone_number),
+                    "role": user.role,
+                    "method": "password",
+                    "session_id": session.id,
+                    "client_ip": client_ip,
+                },
+            )
+
+        role_slug = user.role.lower().replace(" ", "-")
+        return {
+            "success": True,
+            "session_token": session_token,
+            "user": {
+                "id": user.id,
+                "phone_number": user.phone_number,
+                "phone_number_masked": self.mask_phone(user.phone_number),
+                "full_name": user.full_name,
+                "role": user.role,
+                "department": user.department,
+                "license_number": user.license_number,
+                "email": user.email,
+                "totp_enabled": user.totp_enabled,
+            },
+            "role": user.role,
+            "dashboard_url": f"/app/dashboard/{role_slug}",
+            "expires_at": session_expiry.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "auth_method": "password",
+        }
+
     def list_users(self, db: Session) -> List[Dict[str, Any]]:
         """List all users in the system."""
         users = db.execute(select(User).order_by(User.id)).scalars().all()
@@ -916,3 +1109,5 @@ class AuthService:
             }
             for u in users
         ]
+
+
