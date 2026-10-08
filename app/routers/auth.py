@@ -8,8 +8,10 @@ from app.schemas_auth import (
     OTPRequestSchema,
     OTPResponseSchema,
     OTPVerifySchema,
+    PasswordLoginRequest,
     ProviderStatusResponse,
     ProviderSwitchRequest,
+    RoleSwitchRequest,
     TOTPEnrollSetupRequest,
     TOTPEnrollSetupResponse,
     TOTPEnrollVerifyRequest,
@@ -37,10 +39,53 @@ from engine.auth.service import AuthService
 router = APIRouter(prefix="/auth", tags=["Authentication & Roles"])
 
 
+@router.post("/login", response_model=AuthSessionResponse, summary="Direct clinician sign-in with phone number and password")
+def login_with_password(
+    payload: PasswordLoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Direct authenticated sign-in for clinicians.
+    Validates credentials, creates an active cryptographic session, sets the auth cookie,
+    and returns full profile and active workspace routing.
+    """
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    user_agent = request.headers.get("user-agent", "Unknown")
+
+    try:
+        session_data = auth_service.login_with_password(
+            db=db,
+            phone_number=payload.phone_number,
+            password=payload.password,
+            role=payload.role,
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+
+        response.set_cookie(
+            key="aegis_session",
+            value=session_data["session_token"],
+            httponly=True,
+            samesite="lax",
+            max_age=AuthConfig.SESSION_EXPIRY_HOURS * 3600,
+        )
+
+        return session_data
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
+
 @router.get("/demo-personas", response_model=List[DemoPersonaResponse], summary="Retrieve pre-configured demo personas")
 def get_demo_personas():
     """Returns the 4 official demo personas for offline evaluation."""
     return DEMO_PERSONAS
+
 
 
 @router.post("/otp/request", response_model=OTPResponseSchema, summary="Request 6-digit OTP for mobile authentication")
@@ -364,4 +409,38 @@ def get_demo_totp_code(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+
+
+@router.post("/switch-role", summary="Switch active clinical workspace role without logging out")
+def switch_active_role(
+    payload: RoleSwitchRequest,
+    request: Request,
+    token: Optional[str] = Depends(get_session_token_from_request),
+    db: Session = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Seamlessly switches the active clinical workspace role on an existing authenticated session.
+    Preserves cryptographic session token, updates role authorizations, and appends audit trail entry.
+    """
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Active authenticated session required to switch workspace roles.",
+        )
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    try:
+        res = auth_service.switch_session_role(
+            db=db,
+            session_token=token,
+            target_role=payload.role,
+            client_ip=client_ip,
+        )
+        return res
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
+
 

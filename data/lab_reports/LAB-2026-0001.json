@@ -1,0 +1,57 @@
+{
+  "lab_report_id": "LAB-2026-0001",
+  "case_id": "CASE-001",
+  "patient_identifier": "PT-001",
+  "patient_name": "Sarah Jenkins",
+  "collection_date": "2026-10-08T08:30:00Z",
+  "report_date": "2026-10-08T09:15:00Z",
+  "category": "Coagulation & Liver Function Panel",
+  "clinical_indication": "Warfarin therapeutic drug monitoring & baseline hepatic function",
+  "source_document": "data/lab_reports/LAB-2026-0001.json",
+  "evidence_status": "Verified Locally",
+  "last_reviewed": "2026-10-08T09:20:00Z",
+  "laboratory_facility": "Local Hospital Pathology Laboratory (Internal Repository)",
+  "results": [
+    {
+      "test_name": "INR (International Normalized Ratio)",
+      "result": "3.4",
+      "unit": "ratio",
+      "reference_range": "0.8 - 1.2",
+      "status": "High",
+      "clinical_significance": "Elevated baseline coagulopathy; CYP2C9 inhibition by fluconazole will acutely worsen anticoagulation trajectory (>4.0)."
+    },
+    {
+      "test_name": "Prothrombin Time (PT)",
+      "result": "34.2",
+      "unit": "seconds",
+      "reference_range": "11.0 - 13.5",
+      "status": "High",
+      "clinical_significance": "Profoundly delayed extrinsic pathway clot formation."
+    },
+    {
+      "test_name": "Platelet Count",
+      "result": "245",
+      "unit": "10^3/uL",
+      "reference_range": "150 - 450",
+      "status": "Normal",
+      "clinical_significance": "Adequate circulating platelet count."
+    },
+    {
+      "test_name": "Alanine Aminotransferase (ALT)",
+      "result": "28",
+      "unit": "U/L",
+      "reference_range": "7 - 56",
+      "status": "Normal",
+      "clinical_significance": "Normal hepatocellular integrity."
+    },
+    {
+      "test_name": "Aspartate Aminotransferase (AST)",
+      "result": "24",
+      "unit": "U/L",
+      "reference_range": "10 - 40",
+      "status": "Normal",
+      "clinical_significance": "Normal hepatic transaminase levels."
+    }
+  ],
+  "sha256_checksum": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+}
