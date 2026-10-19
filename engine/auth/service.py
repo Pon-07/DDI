@@ -195,7 +195,7 @@ class AuthService:
         for p_otp in prior_otps:
             p_otp.is_used = True
 
-        if is_demo and matched_persona:
+        if is_demo and matched_persona and AuthConfig.DEMO_DEFAULT_OTP:
             otp_code = AuthConfig.DEMO_DEFAULT_OTP
         else:
             otp_code = f"{secrets.randbelow(900000) + 100000}"
