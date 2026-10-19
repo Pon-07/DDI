@@ -23,6 +23,18 @@ env/
 data/raw/*
 data/processed/*
 
+# Databases: never commit live/backup/staging SQLite files (they can hold users, TOTP secrets,
+# sessions and OTP records). Rebuild with scripts/init_db.py and python -m data_pipeline.build.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.contaminated-backup*
+staging/
+data_validation/dailymed/
+
 # Logs
 *.log
 

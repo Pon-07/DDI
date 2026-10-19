@@ -1,0 +1,9 @@
+dataset,check_name,severity,affected,total,detail
+ddinter,legacy_json_description_is_severity_echo,warning,56367,56367,interaction_description == severity in legacy JSON; not carried into clean tables
+ddinter,normalized_name_merges_different_base_drugs,error,1,1694,"{""estrone"": [""estrone"", ""estrone sulfate""]}"
+ddinter,route_or_salt_variants_share_normalized_name,info,52,1694,"e.g. 'Atropine' and 'Atropine (ophthalmic)'. Drug identity in staging is the DDInter ID, so these stay separate entities; join on ingredient_normalized if needed"
+openfda,labels_without_drug_name,error,15951,20000,brand_name and generic_name both empty in source extract; names not inferred
+openfda,multi_product_names,warning,7,20000,"name field holds several products joined by ' | '; kept verbatim, not split"
+openfda,names_longer_than_100_chars,warning,34,20000,typically combination / homeopathic products; will not match single-drug names
+openfda,raw_file_is_git_lfs_pointer,error,1,1,drug-label-0001-of-0014.json
+dailymed,source_archive_missing,error,3694,3694,no DailyMed data ingested; parser is ready and tested (data_pipeline/dailymed.py)
