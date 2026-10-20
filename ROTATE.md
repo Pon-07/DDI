@@ -39,4 +39,14 @@ The report includes database-wide counts for users, matching compromised TOTP va
 
 Before reporting or proceeding, the script checks that `users`, `user_sessions`, and `otp_records` exist and have the columns it relies on. For a backup, it checks SQLite integrity, schema objects, and every table's rows against the source database. The tests use only generated synthetic databases, including a forced failure after an earlier delete to confirm transaction rollback.
 
+After an approved rotation, run read-only verification using the exact backup path printed by `--apply`:
+
+```powershell
+python scripts\rotate_auth_credentials.py --db 'C:\path\to\DDI\aegis_rx.db' --verify --backup 'C:\path\outside\repository\aegis_rx_pre_rotation_TIMESTAMP.db'
+```
+
+If the approved apply used `--scope all`, pass `--scope all` to `--verify` as well.
+
+Verification requires that backup and checks that no compromised TOTP matches, sessions, or OTP records remain; both databases pass SQLite integrity checks; and the current database matches the expected post-rotation result derived from the backup. Keep the backup until separately approved for removal.
+
 Any operation that changes a database requires a separate review and explicit approval. Do not use `--apply`, remove backups, or alter Git history as part of this dry-run review.
