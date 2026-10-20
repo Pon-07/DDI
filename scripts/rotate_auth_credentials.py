@@ -278,6 +278,12 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
                         return EXIT_REFUSED
                 finally:
                     backup_check.close()
+                locked_plan = _plan(conn, hashes, args.scope)
+                if locked_plan != plan:
+                    conn.execute("ROLLBACK")
+                    print("REFUSED: the rotation plan changed before the write lock; no changes were made.")
+                    return EXIT_REFUSED
+                plan = locked_plan
                 tables = plan["tables"]
                 if "user_sessions" in tables:
                     conn.execute("DELETE FROM user_sessions")

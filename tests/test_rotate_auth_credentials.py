@@ -273,3 +273,24 @@ def test_apply_refuses_if_database_changes_after_backup(world, monkeypatch, caps
     assert _rows(world["db"], "SELECT COUNT(*) FROM user_sessions") == [(4,)]
     assert _rows(world["db"], "SELECT COUNT(*) FROM otp_records") == [(2,)]
     assert _rows(world["db"], "SELECT totp_secret FROM users WHERE id=1") == [(world["leaked"][0],)]
+
+
+def test_apply_refuses_if_compromised_secret_changes_between_plan_and_backup(world, monkeypatch, capsys):
+    real_backup = rot._backup
+
+    def backup_after_adding_compromised_secret(source, backup_dir):
+        c = sqlite3.connect(world["db"])
+        c.execute("UPDATE users SET totp_secret=? WHERE id=3", (world["leaked"][0],))
+        c.commit()
+        c.close()
+        return real_backup(source, backup_dir)
+
+    monkeypatch.setattr(rot, "_backup", backup_after_adding_compromised_secret)
+    rc = rot.run(["--db", str(world["db"]), "--backup-dir", str(world["backup"]), "--apply"])
+    out = capsys.readouterr().out
+    assert rc == 2 and "rotation plan changed" in out
+    assert _rows(world["db"], "SELECT totp_secret FROM users WHERE id=1") == [(world["leaked"][0],)]
+    assert _rows(world["db"], "SELECT totp_secret FROM users WHERE id=3") == [(world["leaked"][0],)]
+    assert _rows(world["db"], "SELECT COUNT(*) FROM user_sessions") == [(3,)]
+    assert _rows(world["db"], "SELECT COUNT(*) FROM otp_records") == [(2,)]
+    assert len(list(world["backup"].glob("aegis_rx_pre_rotation_*.db"))) == 1
