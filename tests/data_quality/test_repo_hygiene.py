@@ -78,12 +78,21 @@ def test_no_hardcoded_secrets_in_tracked_text_files():
     assert hits == [], hits
 
 
-def test_tracked_sqlite_files_hold_no_credentials():
-    for p in _tracked():
+def test_tracked_sqlite_files_hold_no_credentials(tmp_path):
+    # Inspect COPIES (database + its -wal): even a read-only open of a WAL database can rewrite its -shm file,
+    # and these tests must never touch the real files.
+    for n, p in enumerate(_tracked()):
         with open(p, "rb") as fh:
             if fh.read(16) != b"SQLite format 3\x00":
                 continue
-        conn = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+        work = tmp_path / str(n)
+        work.mkdir()
+        copy = work / "copy.db"
+        shutil.copy2(p, copy)
+        wal = p.with_name(p.name + "-wal")
+        if wal.exists():
+            shutil.copy2(wal, work / "copy.db-wal")
+        conn = sqlite3.connect(copy)
         try:
             tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
             for t in ("users", "user_sessions", "otp_records"):

@@ -13,6 +13,7 @@ from app.routers import (
     findings,
     labs,
     medications,
+    ml_advisory,
     orders,
     patients,
     simulated_orders,
@@ -56,6 +57,7 @@ app.include_router(labs.router)
 app.include_router(orders.router)
 app.include_router(events.router)
 app.include_router(findings.router)
+app.include_router(ml_advisory.router)
 app.include_router(simulated_orders.router)
 app.include_router(audit.router)
 app.include_router(demo.router)
