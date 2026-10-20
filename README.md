@@ -130,6 +130,20 @@ python -m ml.train_final --clean-dir datasets/clean --seeds 5
 A test fails if `datasets/clean/ddinter_pairs_clean.csv` changes without retraining. Features that would genuinely
 improve it (RxCUI, ATC, CYP450, interaction text, negative pairs, the other 7 DDInter files) are still missing; see below.
 
+### Adding the other DDInter files (biggest expected gain)
+
+Download `ddinter_downloads_code_B/D/H/L/P/R/V.csv` from DDInter, then (nothing is overwritten):
+
+```bash
+python scripts/add_ddinter_files.py PATH/TO/ddinter_downloads_code_B.csv ... --dry-run   # validate + preview pair/conflict counts
+python scripts/add_ddinter_files.py PATH/TO/ddinter_downloads_code_B.csv ...             # copy into data_validation/
+python -m data_pipeline.build        # rebuild clean CSVs/report (pairs repeated across files merge; disagreements stay unlabelled)
+python -m ml.train_final             # retrain + re-validate; compare ml/reports with the previous version before trusting it
+python -m pytest -q
+```
+
+Check the DDInter licence before publishing the redistributed clean CSVs. Any clinical claim needs pharmacist review.
+
 ## Authentication and demo mode
 
 Secure by default: `AEGIS_DEMO_MODE` defaults to `false` and there is no default OTP or TOTP secret in the code.
