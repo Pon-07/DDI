@@ -127,11 +127,37 @@ def test_apply_is_idempotent(world):
 
 
 def test_verify_fails_before_and_passes_after_and_never_writes(world):
-    before = _digest(world["db"])
-    assert rot.run(["--db", str(world["db"]), "--verify"]) == 1
-    assert _digest(world["db"]) == before
     rot.run(["--db", str(world["db"]), "--backup-dir", str(world["backup"]), "--apply"])
-    assert rot.run(["--db", str(world["db"]), "--verify"]) == 0
+    backup = next(world["backup"].glob("aegis_rx_pre_rotation_*.db"))
+    before = _digest(world["db"])
+    assert rot.run(["--db", str(world["db"]), "--verify", "--backup", str(backup)]) == 0
+    assert _digest(world["db"]) == before
+
+
+def test_verify_requires_backup_and_checks_all_post_rotation_invariants(world, capsys):
+    assert rot.run(["--db", str(world["db"]), "--verify"]) == 2
+    rot.run(["--db", str(world["db"]), "--backup-dir", str(world["backup"]), "--apply"])
+    backup = next(world["backup"].glob("aegis_rx_pre_rotation_*.db"))
+    for sql, values in [
+        ("INSERT INTO user_sessions (session_token, user_id) VALUES ('synthetic', 1)", None),
+        ("INSERT INTO otp_records (phone_number, otp_hash) VALUES ('synthetic', 'synthetic')", None),
+        ("UPDATE users SET totp_secret=? WHERE id=1", (world["leaked"][0],)),
+    ]:
+        c = sqlite3.connect(world["db"])
+        c.execute(sql, values or ())
+        c.commit()
+        c.close()
+        assert rot.run(["--db", str(world["db"]), "--verify", "--backup", str(backup)]) == 1
+        # Restore the expected post-rotation state using only this synthetic DB.
+        c = sqlite3.connect(world["db"])
+        c.execute("DELETE FROM user_sessions")
+        c.execute("DELETE FROM otp_records")
+        c.execute("UPDATE users SET totp_secret=NULL, totp_enabled=0, totp_last_verified_at=NULL, "
+                  "totp_last_timestep=NULL WHERE id IN (1,2)")
+        c.commit()
+        c.close()
+    out = capsys.readouterr().out
+    assert "integrity_check: ok" in out and "backup consistency: failed" in out
 
 
 def test_leaked_db_snapshot_secrets_are_treated_as_compromised(world, tmp_path):
@@ -141,9 +167,10 @@ def test_leaked_db_snapshot_secrets_are_treated_as_compromised(world, tmp_path):
     c.execute("INSERT INTO users VALUES (1, ?)", (world["safe"],))   # pretend user 3's secret leaked too
     c.commit()
     c.close()
-    assert rot.run(["--db", str(world["db"]), "--verify", "--leaked-db", str(snap)]) == 1
-    assert rot.run(["--db", str(world["db"]), "--backup-dir", str(world["backup"]), "--apply",
-                    "--leaked-db", str(snap)]) == 0
+    rot.run(["--db", str(world["db"]), "--backup-dir", str(world["backup"]), "--apply",
+             "--leaked-db", str(snap)])
+    backup = next(world["backup"].glob("aegis_rx_pre_rotation_*.db"))
+    assert rot.run(["--db", str(world["db"]), "--verify", "--backup", str(backup), "--leaked-db", str(snap)]) == 0
     assert _rows(world["db"], "SELECT totp_secret FROM users WHERE id=3") == [(None,)]
 
 
@@ -182,7 +209,8 @@ def test_refuses_missing_or_foreign_database(tmp_path, capsys):
 def test_output_never_contains_secrets_tokens_or_phone_numbers(world, capsys):
     rot.run(["--db", str(world["db"])])
     rot.run(["--db", str(world["db"]), "--backup-dir", str(world["backup"]), "--apply"])
-    rot.run(["--db", str(world["db"]), "--verify"])
+    backup = next(world["backup"].glob("aegis_rx_pre_rotation_*.db"))
+    rot.run(["--db", str(world["db"]), "--verify", "--backup", str(backup)])
     out = capsys.readouterr().out
     for secret in world["leaked"] + [world["safe"]]:
         assert secret not in out

@@ -182,6 +182,45 @@ def _databases_match(src: sqlite3.Connection, dst: sqlite3.Connection) -> bool:
     return all(_rows_match(src, dst, table) for table in sorted(tables))
 
 
+def _post_rotation_matches(backup: sqlite3.Connection, current: sqlite3.Connection,
+                           hashes: Set[str], scope: str) -> bool:
+    """Check that current DB is exactly the expected result of rotating this backup."""
+    backup_tables, current_tables = _tables(backup), _tables(current)
+    if (backup_tables != current_tables or _schema_signature(backup) != _schema_signature(current)
+            or not _integrity_ok(backup) or not _integrity_ok(current)):
+        return False
+    plan = _plan(backup, hashes, scope)
+    cleared = set(plan["target_ids"])
+    for table in sorted(backup_tables):
+        if table in {"user_sessions", "otp_records"}:
+            if _count(current, table, current_tables) != 0:
+                return False
+            continue
+        if table != "users":
+            if not _rows_match(backup, current, table):
+                return False
+            continue
+        quote = lambda value: '"' + value.replace('"', '""') + '"'
+        columns = [row[1] for row in backup.execute("PRAGMA table_info(users)")]
+        order_by = ", ".join(quote(column) for column in columns)
+        before = backup.execute(f"SELECT * FROM users ORDER BY {order_by}")
+        after = current.execute(f"SELECT * FROM users ORDER BY {order_by}")
+        indexes = {name: i for i, name in enumerate(columns)}
+        for old, new in zip(before, after):
+            expected = list(old)
+            if old[indexes["id"]] in cleared:
+                expected[indexes["totp_secret"]] = None
+                expected[indexes["totp_enabled"]] = 0
+                expected[indexes["totp_last_verified_at"]] = None
+                expected[indexes["totp_last_timestep"]] = None
+            if tuple(expected) != new:
+                return False
+        # zip() alone would miss extra rows if either cursor has a different length.
+        if before.fetchone() is not None or after.fetchone() is not None:
+            return False
+    return True
+
+
 def _backup(src: sqlite3.Connection, backup_dir: Path) -> Path:
     backup_dir.mkdir(parents=True, exist_ok=True)
     stamp = _dt.datetime.now(_dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -212,6 +251,8 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
     mode = ap.add_mutually_exclusive_group()
     mode.add_argument("--apply", action="store_true", help="make the changes (default is a dry run)")
     mode.add_argument("--verify", action="store_true", help="read-only: fail if a compromised secret is still present")
+    ap.add_argument("--backup", type=Path,
+                    help="pre-rotation backup to verify against (required with --verify)")
     ap.add_argument("--scope", choices=("compromised", "all"), default="compromised",
                     help="'compromised' (default) clears only leaked secrets; 'all' clears every user's TOTP secret")
     ap.add_argument("--leaked-db", type=Path, action="append", default=[],
@@ -227,17 +268,29 @@ def run(argv: Optional[Sequence[str]] = None) -> int:
         hashes = _compromised_hashes(args.leaked_db)
 
         if args.verify:
+            if args.backup is None or not args.backup.is_file():
+                raise Refused("--verify requires the existing pre-rotation backup path printed by --apply.")
+            if args.backup.resolve() == args.db.resolve():
+                raise Refused("--backup must be a separate pre-rotation backup file, not --db itself.")
             conn = _connect(args.db, "ro")
+            backup_conn = _connect(args.backup, "ro")
             try:
                 tables = _validate_schema(conn)
+                _validate_schema(backup_conn)
                 bad = sum(1 for _, s in _secrets(conn, tables) if _sha(s) in hashes)
+                sessions = _count(conn, "user_sessions", tables)
+                otps = _count(conn, "otp_records", tables)
+                integrity = _integrity_ok(conn)
+                backup_ok = _post_rotation_matches(backup_conn, conn, hashes, args.scope)
                 print("VERIFY (read-only)")
-                print(f"  users: {_count(conn, 'users', tables)} | sessions: {_count(conn, 'user_sessions', tables)} "
-                      f"| one-time-code records: {_count(conn, 'otp_records', tables)}")
-                print(f"  compromised TOTP secrets still present: {bad} (must be 0)")
+                print(f"  compromised TOTP secrets: {bad} (must be 0) | sessions: {sessions} (must be 0) "
+                      f"| one-time-code records: {otps} (must be 0)")
+                print(f"  integrity_check: {'ok' if integrity else 'failed'} | backup consistency: "
+                      f"{'ok' if backup_ok else 'failed'}")
             finally:
+                backup_conn.close()
                 conn.close()
-            return EXIT_OK if bad == 0 else EXIT_PROBLEM
+            return EXIT_OK if bad == 0 and sessions == 0 and otps == 0 and integrity and backup_ok else EXIT_PROBLEM
 
         if not args.apply:
             conn = _connect(args.db, "ro")
