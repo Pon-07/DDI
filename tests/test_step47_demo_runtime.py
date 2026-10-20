@@ -164,7 +164,10 @@ class TestStep47DemoRuntime(unittest.TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn("text/html", res.headers.get("content-type", ""))
         self.assertIn("AEGIS Rx", res.text)
-        self.assertIn("Official Hackathon Demo Scenarios", res.text)
+        # The /demo page is now the clinical workspace; the three official scenarios are served by the API.
+        status_res = self.client.get("/demo/status")
+        self.assertEqual(status_res.status_code, 200)
+        self.assertEqual(len(status_res.json()["scenarios"]), 3)
         self.assertIn("Offline Verified", res.text)
 
 

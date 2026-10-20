@@ -158,12 +158,12 @@ require a session; the secrets already published in git history stay valid in an
 4. **Secrets in git history:** `aegis_rx.db-wal` was committed and contains TOTP secrets, sessions and OTP records. Run `bash scripts/repo_hygiene.sh`
    (untracks the DB files), then follow its printed steps: rotate secrets, set `AEGIS_DEMO_MODE=false`, change `AEGIS_DEMO_DEFAULT_OTP`,
    purge history with `git filter-repo`, force-push. `scripts/sanitize_local_db.py` produces a share-safe copy of a DB.
-5. Known failing test (pre-existing, unrelated): `tests/test_step47_demo_runtime.py::test_demo_html_interface` expects "AEGIS Rx" in the HTML, which still says MICROMEDX.
+5. Branding is still mixed: the `/demo` page now says AEGIS Rx, but MICROMEDX remains in the main workspace (`web_app.py`), the TOTP issuer (kept so existing authenticator entries keep working) and e-mail domains. Pick one name and change them together.
 6. `estrone` vs `estrone sulfate` still normalise to one name (flagged, not merged blindly).
 
 ## Tests
 
-`pytest -q` -> 489 passed, 1 failed (the pre-existing branding test above), run after `scripts/repo_hygiene.sh`; with the DB files still tracked the two hygiene tests fail by design. New tests: `tests/data_quality/`, `tests/test_normalizer_collisions.py`,
+`pytest -q` -> 490 passed, 0 failed, run after `scripts/repo_hygiene.sh`; with the DB files still tracked the two hygiene tests fail by design. New tests: `tests/data_quality/`, `tests/test_normalizer_collisions.py`,
 `tests/test_ddinter_adapter_reversed_pairs.py`, `tests/test_sanitize_local_db.py` (94 tests). They check DDInter counts against the CSV independently,
 reproducibility (two builds identical), production DB untouched, no fabricated features, requirements encoding and no tracked DB files / hardcoded secrets.
 The hygiene tests fail on the repo as shipped and pass after `scripts/repo_hygiene.sh`.
