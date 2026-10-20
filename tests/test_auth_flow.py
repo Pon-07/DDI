@@ -1,4 +1,5 @@
 import os
+import secrets
 import tempfile
 import unittest
 from sqlalchemy import create_engine
@@ -26,6 +27,13 @@ class TestAuthFlow(unittest.TestCase):
     """
 
     def setUp(self):
+        # The demo OTP is no longer a constant in code: each test run opts in with a random, non-trivial code.
+        self._orig_demo_otp = AuthConfig.DEMO_DEFAULT_OTP
+        self.demo_otp = f"{secrets.randbelow(900000) + 100000}"
+        while self.demo_otp in AuthConfig._WEAK_OTPS:
+            self.demo_otp = f"{secrets.randbelow(900000) + 100000}"
+        AuthConfig.DEMO_DEFAULT_OTP = self.demo_otp
+
         # In-memory SQLite with StaticPool
         self.engine = create_engine(
             "sqlite:///:memory:",
@@ -60,6 +68,7 @@ class TestAuthFlow(unittest.TestCase):
         self.client = LocalTestClient(app)
 
     def tearDown(self):
+        AuthConfig.DEMO_DEFAULT_OTP = self._orig_demo_otp
         app.dependency_overrides.clear()
         self.db.close()
         AuthBase.metadata.drop_all(bind=self.engine)
@@ -89,7 +98,7 @@ class TestAuthFlow(unittest.TestCase):
         self.assertTrue(data["success"])
         self.assertTrue(data["is_demo_mode"])
         self.assertIsNotNone(data["preview_otp"])
-        self.assertEqual(data["preview_otp"], "123456")
+        self.assertEqual(data["preview_otp"], self.demo_otp)
         self.assertIn("••••", data["phone_number_masked"])
 
     def test_production_mode_does_not_hardcode_or_leak_otp(self):
@@ -126,7 +135,7 @@ class TestAuthFlow(unittest.TestCase):
         # 2. Verify OTP
         res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192831", "otp_code": "123456", "role": "Doctor"},
+            json={"phone_number": "+15550192831", "otp_code": self.demo_otp, "role": "Doctor"},
         )
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -168,7 +177,7 @@ class TestAuthFlow(unittest.TestCase):
             self.client.post("/auth/otp/request", json={"phone_number": phone, "demo_mode": True})
             verify_res = self.client.post(
                 "/auth/otp/verify",
-                json={"phone_number": phone, "otp_code": "123456", "role": role},
+                json={"phone_number": phone, "otp_code": self.demo_otp, "role": role},
             )
             self.assertEqual(verify_res.status_code, 200)
             data = verify_res.json()
@@ -182,7 +191,7 @@ class TestAuthFlow(unittest.TestCase):
         self.client.post("/auth/otp/request", json={"phone_number": "+15550192831", "demo_mode": True})
         verify_res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192831", "otp_code": "123456", "role": "Doctor"},
+            json={"phone_number": "+15550192831", "otp_code": self.demo_otp, "role": "Doctor"},
         )
         token = verify_res.json()["session_token"]
 
@@ -220,7 +229,7 @@ class TestAuthFlow(unittest.TestCase):
         self.client.post("/auth/otp/verify", json={"phone_number": phone, "otp_code": "999999", "role": "Doctor"})
 
         # 3. Successful login
-        res = self.client.post("/auth/otp/verify", json={"phone_number": phone, "otp_code": "123456", "role": "Doctor"})
+        res = self.client.post("/auth/otp/verify", json={"phone_number": phone, "otp_code": self.demo_otp, "role": "Doctor"})
         token = res.json()["session_token"]
 
         # 4. Logout

@@ -69,6 +69,7 @@ def login_with_password(
             key="aegis_session",
             value=session_data["session_token"],
             httponly=True,
+            secure=AuthConfig.COOKIE_SECURE,
             samesite="lax",
             max_age=AuthConfig.SESSION_EXPIRY_HOURS * 3600,
         )
@@ -147,6 +148,7 @@ def verify_otp(
             key="aegis_session",
             value=session_data["session_token"],
             httponly=True,
+            secure=AuthConfig.COOKIE_SECURE,
             samesite="lax",
             max_age=AuthConfig.SESSION_EXPIRY_HOURS * 3600,
         )
@@ -317,6 +319,7 @@ def totp_enroll_verify(
             key="aegis_session",
             value=session_data["session_token"],
             httponly=True,
+            secure=AuthConfig.COOKIE_SECURE,
             samesite="lax",
             max_age=AuthConfig.SESSION_EXPIRY_HOURS * 3600,
         )
@@ -363,6 +366,7 @@ def totp_login(
             key="aegis_session",
             value=session_data["session_token"],
             httponly=True,
+            secure=AuthConfig.COOKIE_SECURE,
             samesite="lax",
             max_age=AuthConfig.SESSION_EXPIRY_HOURS * 3600,
         )

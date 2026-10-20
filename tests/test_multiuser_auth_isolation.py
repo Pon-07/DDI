@@ -58,6 +58,11 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         self.pharm_persona = next(p for p in DEMO_PERSONAS if p["role"] == "Clinical Pharmacist")
         self.admin_persona = next(p for p in DEMO_PERSONAS if p["role"] == "Administrator")
 
+    def _secret(self, persona):
+        """TOTP secrets are random per database; read the seeded row (never a value in source code)."""
+        user = self.db.query(User).filter(User.phone_number == persona["phone_number"]).one()
+        return user.totp_secret
+
     def tearDown(self):
         self.db.close()
         self.temp_dir.cleanup()
@@ -65,9 +70,11 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
 
     def test_each_persona_has_distinct_totp_secret(self):
         """Verify each enrolled user has a distinct TOTP secret."""
-        secrets = [p["totp_secret"] for p in DEMO_PERSONAS]
+        secrets = [self._secret(p) for p in DEMO_PERSONAS]
         self.assertEqual(len(secrets), 4)
         self.assertEqual(len(set(secrets)), 4, "All 4 personas must have unique secrets.")
+        self.assertTrue(all(s and len(s) >= 16 for s in secrets))
+        self.assertFalse(any("totp_secret" in p for p in DEMO_PERSONAS), "no secret may be hardcoded in source")
 
     def test_user_a_doctor_login_then_logout_then_user_b_nurse_login(self):
         """
@@ -76,7 +83,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         User B (Nurse) logs in with Nurse TOTP -> verified -> Nurse dashboard.
         """
         # 1. User A (Doctor) Login
-        doc_totp = pyotp.TOTP(self.doc_persona["totp_secret"])
+        doc_totp = pyotp.TOTP(self._secret(self.doc_persona))
         doc_code = doc_totp.now()
 
         res_a = self.client.post(
@@ -116,7 +123,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         self.assertEqual(res_me_invalid.status_code, 401)
 
         # 4. User B (Nurse) Login Independently
-        nurse_totp = pyotp.TOTP(self.nurse_persona["totp_secret"])
+        nurse_totp = pyotp.TOTP(self._secret(self.nurse_persona))
         nurse_code = nurse_totp.now()
 
         res_b = self.client.post(
@@ -149,7 +156,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         - Nurse's TOTP cannot authenticate Doctor
         - Pharmacist's TOTP cannot authenticate Admin
         """
-        doc_totp = pyotp.TOTP(self.doc_persona["totp_secret"])
+        doc_totp = pyotp.TOTP(self._secret(self.doc_persona))
         doc_code = doc_totp.now()
 
         # Try logging in as Nurse using Doctor's TOTP
@@ -165,7 +172,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         self.assertIn("Invalid or expired 6-digit authenticator code", res.json()["detail"])
 
         # Try logging in as Doctor using Nurse's TOTP
-        nurse_totp = pyotp.TOTP(self.nurse_persona["totp_secret"])
+        nurse_totp = pyotp.TOTP(self._secret(self.nurse_persona))
         nurse_code = nurse_totp.now()
 
         res2 = self.client.post(
@@ -181,7 +188,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
     def test_all_four_roles_independent_totp_success(self):
         """Verify all 4 personas (Doctor, Nurse, Pharmacist, Admin) authenticate independently."""
         for persona in [self.doc_persona, self.nurse_persona, self.pharm_persona, self.admin_persona]:
-            totp = pyotp.TOTP(persona["totp_secret"])
+            totp = pyotp.TOTP(self._secret(persona))
             code = totp.now()
 
             res = self.client.post(
@@ -200,7 +207,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
     def test_audit_ledger_records_multiuser_lifecycle(self):
         """Verify AuditLedger logs AUTH_TOTP_SUCCESS and AUTH_LOGOUT with intact SHA-256 chain."""
         # 1. Doctor login
-        doc_totp = pyotp.TOTP(self.doc_persona["totp_secret"])
+        doc_totp = pyotp.TOTP(self._secret(self.doc_persona))
         res_a = self.client.post(
             "/auth/totp/verify",
             json={
@@ -218,7 +225,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         )
 
         # 3. Nurse login
-        nurse_totp = pyotp.TOTP(self.nurse_persona["totp_secret"])
+        nurse_totp = pyotp.TOTP(self._secret(self.nurse_persona))
         self.client.post(
             "/auth/totp/verify",
             json={

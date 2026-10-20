@@ -44,6 +44,15 @@ class AuthService:
         eng = target_engine or default_engine
         AuthBase.metadata.create_all(bind=eng)
 
+    def _demo_otp(self) -> Optional[str]:
+        """Fixed demo OTP (demo mode only; None otherwise)."""
+        return AuthConfig.demo_otp(self.demo_mode)
+
+    def _role_choice_allowed(self, user: Optional[User]) -> bool:
+        """A client-supplied role may change the stored role only in demo mode for demo-enabled users.
+        In every other case the stored role is authoritative, so a login cannot escalate privileges."""
+        return bool(self.demo_mode and user is not None and getattr(user, "demo_mode_allowed", False))
+
     def _hash_otp(self, phone_number: str, otp_code: str) -> str:
         """Create a deterministic SHA-256 hash of phone + OTP code."""
         salt = "micromedx_safety_auth_salt_2026"
@@ -120,7 +129,7 @@ class AuthService:
                     email=persona.get("email"),
                     is_active=True,
                     demo_mode_allowed=True,
-                    totp_secret=persona.get("totp_secret", pyotp.random_base32()),
+                    totp_secret=pyotp.random_base32(),
                     totp_enabled=True,
                 )
                 db.add(user)
@@ -133,7 +142,7 @@ class AuthService:
                 existing.license_number = persona.get("license_number")
                 existing.email = persona.get("email")
                 if not existing.totp_secret:
-                    existing.totp_secret = persona.get("totp_secret", pyotp.random_base32())
+                    existing.totp_secret = pyotp.random_base32()
                 existing.totp_enabled = True
                 seeded.append(existing)
 
@@ -155,7 +164,9 @@ class AuthService:
         Enforces rate limiting, expiration, and audit logging.
         """
         normalized_phone = self.normalize_phone(phone_number)
-        is_demo = self.demo_mode if demo_mode is None else demo_mode
+        # The server decides whether demo behaviour (preview OTP in the response) exists. A client can only
+        # opt OUT of it; a request body can never switch it on.
+        is_demo = bool(self.demo_mode and demo_mode is not False)
 
         user_count = db.query(User).count()
         if user_count == 0:
@@ -179,7 +190,7 @@ class AuthService:
                 department=matched_persona.get("department"),
                 license_number=matched_persona.get("license_number"),
                 email=matched_persona.get("email"),
-                totp_secret=matched_persona.get("totp_secret"),
+                totp_secret=pyotp.random_base32(),
                 totp_enabled=True,
             )
             db.add(user)
@@ -195,8 +206,8 @@ class AuthService:
         for p_otp in prior_otps:
             p_otp.is_used = True
 
-        if is_demo and matched_persona and AuthConfig.DEMO_DEFAULT_OTP:
-            otp_code = AuthConfig.DEMO_DEFAULT_OTP
+        if is_demo and matched_persona and self._demo_otp():
+            otp_code = self._demo_otp()
         else:
             otp_code = f"{secrets.randbelow(900000) + 100000}"
 
@@ -289,10 +300,11 @@ class AuthService:
         if otp_record and otp_record.expires_at > now and otp_record.attempts_remaining > 0:
             if hmac.compare_digest(otp_record.otp_hash, calculated_hash):
                 is_valid = True
-            elif (self.demo_mode or otp_record.is_demo) and clean_otp == AuthConfig.DEMO_DEFAULT_OTP:
-                is_valid = True
 
-        if not is_valid and self.demo_mode and clean_otp == AuthConfig.DEMO_DEFAULT_OTP:
+        # The fixed demo OTP works only in demo mode and only for the seeded demo accounts.
+        demo_otp = self._demo_otp()
+        is_demo_account = any(normalized_phone == self.normalize_phone(p["phone_number"]) for p in DEMO_PERSONAS)
+        if not is_valid and demo_otp and is_demo_account and hmac.compare_digest(clean_otp, demo_otp):
             is_valid = True
 
         if not is_valid:
@@ -333,6 +345,8 @@ class AuthService:
 
             default_name = full_name or (matched_persona["full_name"] if matched_persona else f"Clinician {normalized_phone[-4:]}")
             final_role = target_role or (matched_persona["role"] if matched_persona else "Doctor")
+            if final_role == "Administrator" and not (self.demo_mode and matched_persona):
+                raise ValueError("The Administrator role cannot be self-assigned; it must be provisioned for the account.")
             user = User(
                 phone_number=normalized_phone,
                 full_name=default_name,
@@ -341,15 +355,15 @@ class AuthService:
                 license_number=matched_persona.get("license_number") if matched_persona else f"LIC-{secrets.token_hex(3).upper()}",
                 email=matched_persona.get("email") if matched_persona else f"user_{normalized_phone[-4:]}@micromedx-health.org",
                 is_active=True,
-                totp_secret=matched_persona.get("totp_secret", pyotp.random_base32()),
+                totp_secret=pyotp.random_base32(),
                 totp_enabled=True,
             )
             db.add(user)
             db.flush()
         else:
-            if target_role and target_role != user.role:
+            if target_role and target_role != user.role and self._role_choice_allowed(user):
                 user.role = target_role
-            if full_name:
+            if full_name and self._role_choice_allowed(user):
                 user.full_name = full_name
 
         user.last_login_at = now
@@ -440,6 +454,8 @@ class AuthService:
 
             d_name = full_name or (matched_persona["full_name"] if matched_persona else f"Clinician {normalized_phone[-4:]}")
             d_role = target_role or (matched_persona["role"] if matched_persona else "Doctor")
+            if d_role == "Administrator" and not self.demo_mode:
+                raise ValueError("The Administrator role cannot be self-assigned; it must be provisioned for the account.")
             user = User(
                 phone_number=normalized_phone,
                 full_name=d_name,
@@ -454,12 +470,12 @@ class AuthService:
             db.add(user)
             db.flush()
         else:
+            if user.totp_enabled and user.totp_secret:
+                # Handing out (or replacing) the secret of an enrolled account to an unauthenticated caller
+                # would be an account takeover. Re-enrolment needs an authenticated session / admin reset.
+                raise ValueError("Authenticator is already enrolled for this account. Contact an administrator to reset it.")
             if not user.totp_secret:
                 user.totp_secret = pyotp.random_base32()
-            if full_name:
-                user.full_name = full_name
-            if target_role:
-                user.role = target_role
 
         secret = user.totp_secret
         totp = pyotp.TOTP(
@@ -552,7 +568,7 @@ class AuthService:
         user.totp_last_verified_at = now
         user.totp_last_timestep = current_timestep
         user.last_login_at = now
-        if role and role in SUPPORTED_ROLES:
+        if role and role in SUPPORTED_ROLES and self._role_choice_allowed(user):
             user.role = role
 
         session_token = f"micromedx_sess_{secrets.token_urlsafe(36)}"
@@ -650,7 +666,7 @@ class AuthService:
                     department=matched_persona.get("department"),
                     license_number=matched_persona.get("license_number"),
                     email=matched_persona.get("email"),
-                    totp_secret=matched_persona.get("totp_secret"),
+                    totp_secret=pyotp.random_base32(),
                     totp_enabled=True,
                     is_active=True,
                 )
@@ -714,7 +730,7 @@ class AuthService:
         user.totp_last_verified_at = now
         user.totp_last_timestep = current_timestep
         user.last_login_at = now
-        if role and role in SUPPORTED_ROLES:
+        if role and role in SUPPORTED_ROLES and self._role_choice_allowed(user):
             user.role = role
 
         session_token = f"micromedx_sess_{secrets.token_urlsafe(36)}"
@@ -808,17 +824,14 @@ class AuthService:
         Helper method strictly for hackathon demo simulator inspection.
         Generates the real-time active 6-digit TOTP code and countdown info using the stored secret.
         """
+        if not self.demo_mode:
+            raise ValueError("Demo TOTP preview is disabled (AEGIS_DEMO_MODE is not enabled).")
         normalized_phone = self.normalize_phone(phone_number)
         user = db.execute(
             select(User).where(User.phone_number == normalized_phone)
         ).scalar_one_or_none()
 
-        secret = user.totp_secret if user else None
-        if not secret:
-            for p in DEMO_PERSONAS:
-                if normalized_phone == self.normalize_phone(p["phone_number"]):
-                    secret = p.get("totp_secret")
-                    break
+        secret = user.totp_secret if (user and user.demo_mode_allowed) else None
 
         if not secret:
             raise ValueError(f"No TOTP secret found for {self.mask_phone(normalized_phone)}")
@@ -916,6 +929,8 @@ class AuthService:
 
         session, user = res
         prev_role = session.role
+        if target_role != user.role and not self._role_choice_allowed(user):
+            raise ValueError("Role switching is only available for demo accounts in demo mode.")
         session.role = target_role
         user.role = target_role
 
@@ -1010,7 +1025,7 @@ class AuthService:
                     department=matched_persona.get("department"),
                     license_number=matched_persona.get("license_number"),
                     email=matched_persona.get("email"),
-                    totp_secret=matched_persona.get("totp_secret"),
+                    totp_secret=pyotp.random_base32(),
                     totp_enabled=True,
                     is_active=True,
                 )
@@ -1034,7 +1049,7 @@ class AuthService:
 
         now = datetime.utcnow()
         user.last_login_at = now
-        if role and role in SUPPORTED_ROLES:
+        if role and role in SUPPORTED_ROLES and self._role_choice_allowed(user):
             user.role = role
 
         session_token = f"micromedx_sess_{secrets.token_urlsafe(36)}"
