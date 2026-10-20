@@ -189,7 +189,7 @@ class TestApi(unittest.TestCase):
 
         import pyotp
         from engine.auth.models import User
-        user = self.db.query(User).filter(User.phone_number == "+15550192832").one()
+        user = self.db.query(User).filter(User.role == "Nurse").one()
         code = pyotp.TOTP(user.totp_secret).now()
         res = self.client.post("/auth/totp/verify", json={"phone_number": user.phone_number, "totp_code": code})
         self.auth = {"Authorization": f"Bearer {res.json()['session_token']}"}

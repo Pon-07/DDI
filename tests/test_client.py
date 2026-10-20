@@ -1,5 +1,6 @@
 import asyncio
 import json
+import sys
 from typing import Any, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -77,8 +78,14 @@ class LocalTestClient:
         response_headers: List[Tuple[bytes, bytes]] = []
         response_body: List[bytes] = []
 
+        request_body_sent = False
+
         async def receive() -> Dict[str, Any]:
-            return {"type": "http.request", "body": body, "more_body": False}
+            nonlocal request_body_sent
+            if not request_body_sent:
+                request_body_sent = True
+                return {"type": "http.request", "body": body, "more_body": False}
+            return {"type": "http.disconnect"}
 
         async def send(message: Dict[str, Any]) -> None:
             nonlocal response_status, response_headers, response_body
@@ -88,7 +95,16 @@ class LocalTestClient:
             elif message["type"] == "http.response.body":
                 response_body.append(message.get("body", b""))
 
-        asyncio.run(self.app(scope, receive, send))
+        if sys.platform == "win32" and hasattr(asyncio, "WindowsSelectorEventLoopPolicy"):
+            # Proactor loop initialization can block in restricted Windows test environments.
+            original_policy = asyncio.get_event_loop_policy()
+            try:
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+                asyncio.run(self.app(scope, receive, send))
+            finally:
+                asyncio.set_event_loop_policy(original_policy)
+        else:
+            asyncio.run(self.app(scope, receive, send))
 
         return LocalTestResponse(response_status, b"".join(response_body), response_headers)
 

@@ -27,8 +27,8 @@ from engine.auth.providers.local import LocalDemoOTPProvider
 from engine.auth.service import AuthService
 from tests.test_client import LocalTestClient
 
-DOCTOR = "+15550192831"
-NURSE = "+15550192832"
+DOCTOR = next(p["phone_number"] for p in DEMO_PERSONAS if p["role"] == "Doctor")
+NURSE = next(p["phone_number"] for p in DEMO_PERSONAS if p["role"] == "Nurse")
 
 
 def _random_otp() -> str:
@@ -82,7 +82,7 @@ class TestSecureDefaults(unittest.TestCase):
              "from engine.auth.config import AuthConfig as A; print(A.DEMO_MODE, A.DEMO_DEFAULT_OTP, A.COOKIE_SECURE)"],
             capture_output=True, text=True, cwd=Path(__file__).resolve().parents[1], env=env, check=True,
         ).stdout.split()
-        self.assertEqual(out, ["False", "None", "False"])
+        self.assertEqual(out, ["False", "None", "True"])
 
     def test_weak_or_malformed_demo_otp_is_ignored(self):
         original = AuthConfig.DEMO_DEFAULT_OTP
