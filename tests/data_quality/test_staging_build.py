@@ -101,19 +101,21 @@ def test_no_different_drugs_merged_except_known_estrone_case(built):
     detail = [i for i in built["report"]["issues"]
               if i["check_name"] == "normalized_name_merges_different_base_drugs"][0]
     merged = json.loads(detail["detail"]) if detail["detail"] else {}
-    assert set(merged) <= {"estrone"}, merged  # 'estrone' vs 'estrone sulfate' is a documented limitation
+    # documented limitations: the normaliser collapses these pairs onto one name; they are logged, never auto-merged
+    assert set(merged) <= {"estrone", "edetate disodium anhydrous", "silver"}, merged
 
 
-@pytest.mark.skipif(not DD_FILES or sha256_file(DD_FILES[0])[:16] != "5bb75de36056f353",
-                    reason="golden numbers only apply to the shipped DDInter code_A file")
-def test_golden_numbers_for_shipped_code_a_file(staging):
+@pytest.mark.skipif(len(DD_FILES) != 8 or sha256_file(DD_FILES[0])[:16] != "5bb75de36056f353",
+                    reason="golden numbers only apply to the full DDInter download (categories A,B,D,H,L,P,R,V)")
+def test_golden_numbers_for_the_eight_category_files(staging):
     q = lambda s: staging.execute(s).fetchone()[0]
-    assert q("SELECT COUNT(*) FROM ddinter_pairs") == 56367
-    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE severity_label='Major'") == 4906
-    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE severity_label='Moderate'") == 33057
-    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE severity_label='Minor'") == 3637
-    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE label_status='unknown'") == 14767
-    assert q("SELECT COUNT(*) FROM ddinter_drugs") == 1757
+    assert q("SELECT COUNT(*) FROM ddinter_pairs") == 160235
+    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE severity_label='Major'") == 26914
+    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE severity_label='Moderate'") == 96675
+    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE severity_label='Minor'") == 6833
+    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE label_status='unknown'") == 29813
+    assert q("SELECT COUNT(*) FROM ddinter_drugs") == 1939
+    assert q("SELECT COUNT(*) FROM ddinter_pairs WHERE label_status='conflict'") == 0
 
 
 # ----------------------------------------------------------------------------- openFDA -----
@@ -198,20 +200,33 @@ def test_missing_sources_are_recorded_not_hidden(staging):
 
 
 def test_feature_slots_are_empty_never_fabricated(staging):
-    for col in ("rxcui", "atc_codes", "cyp_profile", "drugbank_id"):
+    for col in ("rxcui", "cyp_profile", "drugbank_id"):
         assert staging.execute(f"SELECT COUNT({col}) FROM ddinter_drugs").fetchone()[0] == 0
+    # ATC is filled only from a WHO file in data_validation/, by exact normalised name, and only when that file exists
+    n_atc = staging.execute("SELECT COUNT(atc_codes) FROM ddinter_drugs").fetchone()[0]
+    if list(DATA_DIR.glob("WHO_ATC-DDD*.csv")):
+        assert 0 < n_atc < staging.execute("SELECT COUNT(*) FROM ddinter_drugs").fetchone()[0]
+        assert staging.execute("SELECT COUNT(*) FROM drug_atc WHERE match_type!='exact_normalized_name'").fetchone()[0] == 0
+    else:
+        assert n_atc == 0
     assert staging.execute("SELECT COUNT(rxcui) FROM openfda_labels").fetchone()[0] == 0
 
 
 def test_feature_coverage_reports_missing_ml_features(staging):
     st = {r["feature"]: r["status"] for r in staging.execute("SELECT feature, status FROM feature_coverage")}
-    for f in ("rxcui (RxNorm)", "atc_codes", "cyp450_profile (substrate/inhibitor/inducer)", "negative_pairs (non-interacting drug pairs)"):
+    for f in ("rxcui (RxNorm)", "cyp450_profile (substrate/inhibitor/inducer)", "negative_pairs (non-interacting drug pairs)"):
         assert st[f] in ("missing", "blocked")
+    has_who = bool(list(DATA_DIR.glob("WHO_ATC-DDD*.csv")))
+    assert st["atc_codes"] == ("partial" if has_who else st["atc_codes"])
+    assert st["atc_codes"] in ("partial", "missing", "blocked")
 
 
 def test_ml_readiness_does_not_overclaim(built):
     r = built["report"]["ml_readiness"]
-    assert r["verdict"].startswith("NOT READY")
+    # never a green light: either "NOT READY" (no features) or "LIMITED READINESS" (name text + ATC only)
+    assert r["verdict"].startswith(("NOT READY", "LIMITED READINESS"))
+    for word in ("ready for clinical", "validated", "accurate"):
+        assert word not in r["verdict"].lower().replace("not been clinically validated", "")
     assert r["trainable_labeled_pairs"] == sum(r["class_distribution"].values())
 
 

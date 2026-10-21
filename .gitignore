@@ -41,3 +41,5 @@ data_validation/dailymed/
 # OS
 .DS_Store
 Thumbs.db
+# WHO ATC/DDD index: licensed by WHO, do not redistribute the raw file
+data_validation/WHO_ATC-DDD*.csv

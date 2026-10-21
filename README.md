@@ -27,16 +27,16 @@ Use `AEGIS_DATABASE_URL=sqlite:////path/to/other.db` to point the app/ingest scr
 | `aegis_rx.db` (live) | 0 | 0 | 0 | knowledge was never ingested into it; it only holds users/sessions/OTPs |
 | `aegis_rx.db.contaminated-backup` | 3,126 | 56,367 | 8,997 | test-fixture clinical rows, 768 duplicate label-text groups, `description == severity` on all 56,367 interactions, 0 RxNorm IDs |
 
-### DDInter (only category file **A** is in the repo; A,B,D,H,L,P,R,V expected)
+### DDInter (all 8 category files A,B,D,H,L,P,R,V)
 
 | metric | value |
 |---|---|
-| raw rows (kept verbatim) | 56,367 |
-| quarantined rows | 0 |
-| unordered pairs | 56,367 (0 reversed / 0 same-direction duplicates, 0 severity conflicts) |
-| drugs (DDInter IDs) | 1,757 |
-| **labelled** pairs (trainable) | **41,600** = Moderate 33,057 / Major 4,906 / Minor 3,637 |
-| `Unknown` pairs (NOT a label) | 14,767 |
+| raw rows (kept verbatim) | 8 files, 0 quarantined |
+| unordered pairs | 160,235 (43,826 same-direction duplicates merged, 0 severity conflicts) |
+| drugs (DDInter IDs) | 1,939 |
+| **labelled** pairs (trainable) | **130,422** = Moderate 96,675 / Major 26,914 / Minor 6,833 |
+| `Unknown` pairs (NOT a label) | 29,813 |
+| drugs with a WHO ATC code | 1,619 of 1,939 (83.5%; exact normalised-name match only, no fuzzy matching) |
 
 ### openFDA (only part 1 of 14 is in the repo; the raw JSON is a Git-LFS pointer)
 
@@ -73,19 +73,19 @@ rejects DOCTYPE/ENTITY, size-capped) is tested on synthetic SPL and ready.
 `datasets/clean/`: `ddinter_pairs_clean.csv`, `ddinter_drugs_clean.csv`, `openfda_labels_clean.csv`, `quality_issues.csv`, `feature_coverage.csv`.
 Full machine-readable report: `reports/data_quality/data_quality_report.json`.
 
-## ML readiness (no model trained)
+## ML readiness
 
-**Not ready for a feature-based severity model.** Labels exist (41,600, 79.5% Moderate) but there are no drug-level features:
+**Limited readiness.** Labels exist (130,422, 74% Moderate) and drug features are only name text plus WHO ATC (used when the licensed WHO file is placed in `data_validation/`; it is git-ignored and never committed):
 
 | need | status |
 |---|---|
-| RxNorm RxCUI | 0 / 1,757 - no source in repo (left NULL) |
-| ATC codes | 0 / 1,757 |
-| CYP450 substrate/inhibitor/inducer | 0 / 1,757 |
-| DrugBank IDs | 0 / 1,757 |
+| RxNorm RxCUI | 0 / 1,939 - no source in repo (left NULL) |
+| ATC codes | 1,619 / 1,939 (WHO ATC/DDD 2026-04-25, exact name, 7-character substance codes only) |
+| CYP450 substrate/inhibitor/inducer | 0 / 1,939 |
+| DrugBank IDs | 0 / 1,939 |
 | Interaction text / mechanism | none (CSV has only a level) |
 | Negative (non-interacting) pairs | none - only interaction-vs-severity is possible, not interaction detection |
-| DDInter categories B,D,H,L,P,R,V | missing (1 of 8 files) |
+| DDInter categories | all 8 present |
 
 Use drug-disjoint (cold-start) splits; random pair splits leak drug identity.
 
@@ -97,8 +97,8 @@ advisory is a separate object returned by separate endpoints. It is **not clinic
 
 | | |
 |---|---|
-| Model | balanced logistic regression on symmetric pair features (`[a+b, a*b]`) built from TF-IDF of character 3-4-grams of the normalised ingredient name (the audited baseline in `ml/experiment.py`) |
-| Training data | 41,600 labelled DDInter category-A pairs (`Unknown` excluded); artifact `ml/artifacts/severity_baseline_v1.json` (plain JSON, no pickle), numpy-only inference in `ml/inference.py` |
+| Model | balanced logistic regression on symmetric pair features (`[a+b, a*b]`) built per drug from TF-IDF of character 3-4-grams of the normalised ingredient name plus binary WHO ATC level 1-4 indicators (zeros when a drug has no ATC match) |
+| Training data | 130,422 labelled DDInter pairs from all 8 categories (`Unknown` excluded); artifact `ml/artifacts/severity_baseline_v2.json` (plain JSON, no pickle), numpy-only inference in `ml/inference.py` |
 | Explanation | per-prediction n-gram contributions (exact additive decomposition of the winning logit), probabilities, runner-up, regime, held-out precision of that kind of prediction, limitations |
 | Not for | deciding whether two drugs interact (no negative examples), dosing, overriding rule findings |
 
@@ -106,12 +106,14 @@ Held-out results (5 seeds; mean ± std; chance macro-F1 is about 0.33; full tabl
 
 | regime | meaning | macro-F1 | recall Minor / Moderate / Major |
 |---|---|---|---|
-| `both_seen` | new pair, both drugs seen in training | 0.685 ± 0.011 | 0.83 / 0.77 / 0.85 |
-| `one_unseen` | one drug never seen | 0.581 ± 0.008 | 0.61 / 0.74 / 0.66 |
-| `both_unseen` | cold start | 0.445 ± 0.018 | 0.34 / 0.74 / 0.36 |
+| `both_seen` | new pair, both drugs seen in training | 0.684 ± 0.009 | 0.89 / 0.76 / 0.84 |
+| `one_unseen` | one drug never seen | 0.589 ± 0.011 | 0.60 / 0.74 / 0.67 |
+| `both_unseen` | cold start | 0.485 ± 0.024 | 0.35 / 0.73 / 0.49 |
 
-In the cold-start regime a `Major` prediction was correct only about 30% of the time even in the high-confidence band
-(Major is 10% of pairs), so the advisory is weak for new drugs. The `both_seen` figure mostly reflects drug-identity
+Name-only features on the same splits scored 0.674 / 0.565 / 0.447, so ATC helps mainly for unseen drugs
+(+0.04 cold start, +0.02 one-unseen). The previous v1 model (category A only) scored 0.685 / 0.581 / 0.445, but v1 and v2
+are **not like-for-like**: the class mix changed (Major about 21% of labels versus 12%) and the split populations differ.
+Cold-start performance is still weak (macro-F1 0.485, Minor recall 0.35), so treat the advisory for new drugs with caution. The `both_seen` figure mostly reflects drug-identity
 signal, not pharmacology. The shipped weights are fit on all labelled pairs and have no held-out set of their own.
 If a pair was part of the training data the advisory says so and shows DDInter's own label instead of presenting the
 estimate as a prediction.
@@ -124,15 +126,17 @@ artifact disables it silently and the rule engine is unaffected. `AEGIS_ML_ARTIF
 Retrain (needs `requirements-ml.txt`; reproduces the report and checks numpy inference against scikit-learn to 1e-9):
 
 ```bash
-python -m ml.train_final --clean-dir datasets/clean --seeds 5
+python -m ml.train_final --clean-dir datasets/clean --seeds 5     # --features auto|name|name_atc
 ```
 
 A test fails if `datasets/clean/ddinter_pairs_clean.csv` changes without retraining. Features that would genuinely
-improve it (RxCUI, ATC, CYP450, interaction text, negative pairs, the other 7 DDInter files) are still missing; see below.
+improve it further (RxCUI, CYP450, interaction text, negative pairs) are still missing; see below.
 
-### Adding the other DDInter files (biggest expected gain)
+**WHO licence:** the artifact embeds a small name-to-ATC lookup derived from the WHO ATC/DDD index. Check WHO's terms before redistributing the artifact or the clean drug CSV (`atc_codes` column) publicly.
 
-Download `ddinter_downloads_code_B/D/H/L/P/R/V.csv` from DDInter, then (nothing is overwritten):
+### Adding more DDInter files (all 8 are already integrated)
+
+To add or refresh category files, download `ddinter_downloads_code_B/D/H/L/P/R/V.csv` from DDInter, then (nothing is overwritten):
 
 ```bash
 python scripts/add_ddinter_files.py PATH/TO/ddinter_downloads_code_B.csv ... --dry-run   # validate + preview pair/conflict counts
@@ -167,17 +171,18 @@ require a session; the secrets already published in git history stay valid in an
 ## Remaining issues / blockers
 
 1. Git-LFS raw openFDA file (632 MB) and parts 2-14 are not available; names cannot be recovered for the 15,951 unnamed labels without them.
-2. DDInter files B,D,H,L,P,R,V and the DailyMed archive must be downloaded and placed in `data_validation/` (the build environment had no access to those hosts).
-3. RxNorm / ATC / CYP450 / DrugBank sources are not in the repo (licences or downloads required).
+2. The DailyMed archive must be downloaded and placed in `data_validation/` (the build environment had no access to that host).
+3. RxNorm / CYP450 / DrugBank sources are not in the repo (licences or downloads required). ATC needs the WHO file in `data_validation/` (git-ignored; 16.5% of drugs have no exact-name match).
 4. **Secrets in git history:** `aegis_rx.db-wal` was committed and contains TOTP secrets, sessions and OTP records. Run `bash scripts/repo_hygiene.sh`
    (untracks the DB files), then follow its printed steps: rotate secrets, set `AEGIS_DEMO_MODE=false`, change `AEGIS_DEMO_DEFAULT_OTP`,
    purge history with `git filter-repo`, force-push. `scripts/sanitize_local_db.py` produces a share-safe copy of a DB.
 5. Branding is still mixed: the `/demo` page now says AEGIS Rx, but MICROMEDX remains in the main workspace (`web_app.py`), the TOTP issuer (kept so existing authenticator entries keep working) and e-mail domains. Pick one name and change them together.
-6. `estrone` vs `estrone sulfate` still normalise to one name (flagged, not merged blindly).
+6. Three name collisions are flagged, not merged blindly: `estrone`/`estrone sulfate`, `silver`/`silver nitrate`, `edetate disodium anhydrous`/`edetate calcium disodium anhydrous`.
+7. Every severity label is DDInter's own; no pharmacist has reviewed the model. Pharmacist review is required before any clinical claim.
 
 ## Tests
 
-`pytest -q` -> 490 passed, 0 failed, run after `scripts/repo_hygiene.sh`; with the DB files still tracked the two hygiene tests fail by design. New tests: `tests/data_quality/`, `tests/test_normalizer_collisions.py`,
+`pytest -q` -> 533 passed, 0 failed (full 8-file DDInter data, WHO ATC file present). New tests: `tests/data_quality/`, `tests/test_normalizer_collisions.py`,
 `tests/test_ddinter_adapter_reversed_pairs.py`, `tests/test_sanitize_local_db.py` (94 tests). They check DDInter counts against the CSV independently,
 reproducibility (two builds identical), production DB untouched, no fabricated features, requirements encoding and no tracked DB files / hardcoded secrets.
 The hygiene tests fail on the repo as shipped and pass after `scripts/repo_hygiene.sh`.

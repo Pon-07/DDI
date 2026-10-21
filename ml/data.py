@@ -39,9 +39,22 @@ def build_drug_table(clean_dir: Path) -> pd.DataFrame:
     for c in ("label_renal", "label_hepatic", "label_n_sections", "label_count"):
         out[c] = out[c].fillna(0)
     out["has_qualifier"] = (out["qualifier"] != "").astype(int)
+    if "atc_codes" not in out.columns:
+        out["atc_codes"] = ""
+    out["atc_tokens"] = out["atc_codes"].fillna("").map(atc_tokens)
     # the text used for char n-grams: normalised ingredient name (no label text, so no leakage of outcomes)
     out["name_text"] = out["ingredient_normalized"].where(out["ingredient_normalized"] != "", out["name_normalized"])
     return out.set_index("ddinter_id")
+
+
+def atc_tokens(codes: str) -> str:
+    """'A02BC01;A02BC05' -> 'A A02 A02B A02BC' (ATC levels 1-4 only; level 5 is the substance itself = identity)."""
+    toks = set()
+    for code in str(codes or "").split(";"):
+        code = code.strip()
+        if len(code) == 7:
+            toks.update({code[:1], code[:3], code[:4], code[:5]})
+    return " ".join(sorted(toks))
 
 
 NUMERIC_COLS = ["has_label", "label_renal", "label_hepatic", "has_qualifier"]

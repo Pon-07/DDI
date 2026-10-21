@@ -1,16 +1,26 @@
-# severity-baseline-v1 - validation report
+# severity-baseline-v2 - validation report
 
-Trained 2026-10-20T03:41:31Z on **41,600** labelled DDInter pairs (1,610 drugs): {'Minor': 3637, 'Moderate': 33057, 'Major': 4906}.
+Trained 2026-10-21T01:52:37Z on **130,422** labelled DDInter pairs (1,782 drugs): {'Minor': 6833, 'Moderate': 96675, 'Major': 26914}.
 
-**Advisory only. Not clinically validated.** Features are drug-name text only (no RxCUI/ATC/CYP450/interaction text). The model estimates severity for an interaction that already exists; it was trained without negative examples and cannot tell whether two drugs interact. Chance macro-F1 for 3 classes is ~0.33.
+**Advisory only. Not clinically validated.** Features: TF-IDF of character 3-4-grams of the normalised ingredient name + binary WHO ATC level 1-4 indicators (exact-name match; zeros when unknown); pair = [a+b, a*b]. No RxCUI/CYP450/interaction text. The model estimates severity for an interaction that already exists; it was trained without negative examples and cannot tell whether two drugs interact. Chance macro-F1 for 3 classes is ~0.33.
 
 ## Held-out results (mean ± std over 5 seeds)
 
 | regime | what it means | model macro-F1 | majority | random | recall Minor / Moderate / Major |
 |---|---|---|---|---|---|
-| `both_seen` | new pair, both drugs seen in training | 0.685 ± 0.011 | 0.294 | 0.332 | 0.83 / 0.77 / 0.85 |
-| `one_unseen` | one drug never seen | 0.581 ± 0.008 | 0.296 | 0.335 | 0.61 / 0.74 / 0.66 |
-| `both_unseen` | cold start: neither drug seen | 0.445 ± 0.018 | 0.297 | 0.327 | 0.34 / 0.74 / 0.36 |
+| `both_seen` | new pair, both drugs seen in training | 0.684 ± 0.009 | 0.284 | 0.330 | 0.89 / 0.76 / 0.84 |
+| `one_unseen` | one drug never seen | 0.589 ± 0.011 | 0.285 | 0.333 | 0.60 / 0.74 / 0.67 |
+| `both_unseen` | cold start: neither drug seen | 0.485 ± 0.024 | 0.287 | 0.334 | 0.35 / 0.73 / 0.49 |
+
+## Feature comparison (same splits, same seeds)
+
+| features | both_seen | one_unseen | both_unseen (cold start) |
+|---|---|---|---|
+| name n-grams only | 0.674 ± 0.009 | 0.565 ± 0.010 | 0.447 ± 0.023 |
+| name n-grams + ATC levels 1-4 | 0.684 ± 0.009 | 0.589 ± 0.011 | 0.485 ± 0.024 |
+
+Decision: **ship name + ATC (--features auto)**
+
 
 ## Reliability of a prediction (pooled held-out pairs)
 
@@ -20,47 +30,48 @@ Share of held-out pairs that truly had the predicted label, by confidence band, 
 
 | band | predicted | n | precision | base rate |
 |---|---|---|---|---|
-| low | Minor | 476 | 0.12 | 0.09 |
-| low | Moderate | 875 | 0.84 | 0.79 |
-| low | Major | 515 | 0.15 | 0.12 |
-| medium | Minor | 1499 | 0.27 | 0.09 |
-| medium | Moderate | 3976 | 0.93 | 0.79 |
-| medium | Major | 1761 | 0.30 | 0.12 |
-| high | Minor | 2392 | 0.61 | 0.09 |
-| high | Moderate | 12148 | 0.99 | 0.79 |
-| high | Major | 3488 | 0.64 | 0.12 |
+| low | Minor | 1058 | 0.09 | 0.05 |
+| low | Moderate | 1594 | 0.80 | 0.74 |
+| low | Major | 1178 | 0.26 | 0.21 |
+| medium | Minor | 3658 | 0.20 | 0.05 |
+| medium | Moderate | 10589 | 0.88 | 0.74 |
+| medium | Major | 6613 | 0.37 | 0.21 |
+| high | Minor | 6600 | 0.45 | 0.05 |
+| high | Moderate | 37054 | 0.98 | 0.74 |
+| high | Major | 15810 | 0.76 | 0.21 |
 
 ### `one_unseen`
 
 | band | predicted | n | precision | base rate |
 |---|---|---|---|---|
-| low | Minor | 1283 | 0.16 | 0.09 |
-| low | Moderate | 2192 | 0.79 | 0.80 |
-| low | Major | 1291 | 0.19 | 0.11 |
-| medium | Minor | 3749 | 0.23 | 0.09 |
-| medium | Moderate | 11122 | 0.85 | 0.80 |
-| medium | Major | 4692 | 0.30 | 0.11 |
-| high | Minor | 5109 | 0.48 | 0.09 |
-| high | Moderate | 28905 | 0.94 | 0.80 |
-| high | Major | 6324 | 0.49 | 0.11 |
+| low | Minor | 2681 | 0.10 | 0.05 |
+| low | Moderate | 4599 | 0.73 | 0.75 |
+| low | Major | 3242 | 0.28 | 0.20 |
+| medium | Minor | 8255 | 0.18 | 0.05 |
+| medium | Moderate | 29618 | 0.80 | 0.75 |
+| medium | Major | 16876 | 0.35 | 0.20 |
+| high | Minor | 14031 | 0.36 | 0.05 |
+| high | Moderate | 94236 | 0.92 | 0.75 |
+| high | Major | 32661 | 0.63 | 0.20 |
 
 ### `both_unseen`
 
 | band | predicted | n | precision | base rate |
 |---|---|---|---|---|
-| low | Minor | 166 | 0.16 | 0.09 |
-| low | Moderate | 330 | 0.72 | 0.80 |
-| low | Major | 151 | 0.09 | 0.10 |
-| medium | Minor | 430 | 0.18 | 0.09 |
-| medium | Moderate | 1596 | 0.80 | 0.80 |
-| medium | Major | 534 | 0.24 | 0.10 |
-| high | Minor | 504 | 0.29 | 0.09 |
-| high | Moderate | 3467 | 0.88 | 0.80 |
-| high | Major | 495 | 0.30 | 0.10 |
+| low | Minor | 333 | 0.12 | 0.06 |
+| low | Moderate | 630 | 0.68 | 0.76 |
+| low | Major | 428 | 0.24 | 0.19 |
+| medium | Minor | 948 | 0.15 | 0.06 |
+| medium | Moderate | 3897 | 0.76 | 0.76 |
+| medium | Major | 2158 | 0.32 | 0.19 |
+| high | Minor | 1460 | 0.23 | 0.06 |
+| high | Moderate | 12021 | 0.87 | 0.76 |
+| high | Major | 3250 | 0.46 | 0.19 |
 
 ## Notes
 
-- Runtime inference (`ml/inference.py`, numpy) matches scikit-learn to 6.7e-13 and is exactly symmetric in (A, B).
+- Runtime inference (`ml/inference.py`, numpy) matches scikit-learn to 5.8e-13 and is exactly symmetric in (A, B).
 - The shipped weights are fit on all labelled pairs; they have no held-out set of their own.
 - `both_seen` numbers reflect drug-identity signal; they say nothing about pharmacology.
-- Only DDInter category A is available (1 of 8 files), so coverage of drug classes is partial.
+- ATC codes come from an exact-name match to the WHO ATC/DDD index; drugs without a match have no ATC features.
+- All 8 DDInter category files are used, but DDInter is still the only label source and has no negative pairs.

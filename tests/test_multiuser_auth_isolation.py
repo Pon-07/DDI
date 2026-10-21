@@ -98,7 +98,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         data_a = res_a.json()
         token_a = data_a["session_token"]
         self.assertEqual(data_a["role"], "Doctor")
-        self.assertEqual(data_a["user"]["full_name"], "Dr. Sarah Lin, MD")
+        self.assertEqual(data_a["user"]["full_name"], "Demo Doctor")
 
         # Verify /auth/me returns Doctor
         res_me_a = self.client.get(
@@ -139,7 +139,7 @@ class TestMultiUserAuthIsolation(unittest.TestCase):
         token_b = data_b["session_token"]
         self.assertNotEqual(token_a, token_b, "User B must receive a distinct session token.")
         self.assertEqual(data_b["role"], "Nurse")
-        self.assertEqual(data_b["user"]["full_name"], "Elena Rostova, RN")
+        self.assertEqual(data_b["user"]["full_name"], "Demo Nurse")
 
         # Verify /auth/me returns Nurse
         res_me_b = self.client.get(

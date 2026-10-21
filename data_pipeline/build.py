@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from data_pipeline import PIPELINE_VERSION
+from data_pipeline import atc
 from data_pipeline import dailymed as dm
 from data_pipeline import ddinter as ddi
 from data_pipeline import features as feat
@@ -176,10 +177,32 @@ def run_build(
     stg.load_ddinter(conn, dd, file_ids)
     issues.extend(dd.issues)
 
+    # ===== WHO ATC (optional; exact normalised-name matching only) =============================
+    atc_files = sorted(data_dir.glob("WHO_ATC-DDD*.csv"))
+    atc_stats = None
+    if atc_files:
+        atc_path = atc_files[-1]
+        atc_rows = atc.read_atc(atc_path)
+        stg.add_source_file(conn, dataset="who_atc", path=f"{DATA_DIR}/{atc_path.name}", sha256=sha256_file(atc_path),
+                            size_bytes=atc_path.stat().st_size, row_count=len(atc_rows), status="ingested")
+        report["inputs"].append({"path": f"{DATA_DIR}/{atc_path.name}", "sha256": sha256_file(atc_path), "rows": len(atc_rows)})
+        conn.executemany("INSERT INTO atc_codes(atc_code,atc_name,ddd,uom,adm_r,note) VALUES (?,?,?,?,?,?)",
+                         [(r["atc_code"], r["atc_name"], r["ddd"], r["uom"], r["adm_r"], r["note"]) for r in atc_rows])
+        matched, atc_stats = atc.match_drugs(dd.drugs, atc_rows)
+        conn.executemany("INSERT INTO drug_atc VALUES (?,?, 'exact_normalized_name')",
+                         [(i, c) for i, codes in matched.items() for c in codes])
+        conn.executemany("UPDATE ddinter_drugs SET atc_codes=? WHERE ddinter_id=?",
+                         [(";".join(codes), i) for i, codes in matched.items()])
+        for d in dd.drugs:  # keep the exported clean CSV consistent with the staging table
+            if d["ddinter_id"] in matched:
+                d["atc_codes"] = ";".join(matched[d["ddinter_id"]])
+        report["atc"] = atc_stats
+
     legacy_json = data_dir / "ddinter_normalized.json"
     json_check = None
     if legacy_json.exists():
-        json_check = _verify_ddinter_json(legacy_json, raw_rows)
+        # the legacy JSON was exported from category A only; compare like with like
+        json_check = _verify_ddinter_json(legacy_json, [r for r in raw_rows if r.file == "ddinter_downloads_code_A.csv"])
         stg.add_source_file(conn, dataset="ddinter_legacy_json", path=f"{DATA_DIR}/ddinter_normalized.json",
                             sha256=sha256_file(legacy_json), size_bytes=legacy_json.stat().st_size,
                             row_count=json_check["json_rows"], status="ingested",
@@ -314,7 +337,7 @@ def run_build(
         raise RuntimeError("Production database files changed during the staging build! Aborting.")
 
     tables = ["source_files", "ddinter_raw", "ddinter_drugs", "ddinter_pairs", "ddinter_pair_rows",
-              "openfda_labels", "openfda_sections", "dailymed_labels", "dailymed_sections", "drug_xref",
+              "openfda_labels", "openfda_sections", "dailymed_labels", "dailymed_sections", "drug_xref", "atc_codes", "drug_atc",
               "quality_issues", "feature_coverage"]
     table_counts = {t: cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
 

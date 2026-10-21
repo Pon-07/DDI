@@ -1,22 +1,22 @@
 {
   "after": {
     "clean_csv_exports": {
-      "ddinter_drugs_clean.csv": 1757,
-      "ddinter_pairs_clean.csv": 56367,
+      "ddinter_drugs_clean.csv": 1939,
+      "ddinter_pairs_clean.csv": 160235,
       "feature_coverage.csv": 13,
       "openfda_labels_clean.csv": 20000,
-      "quality_issues.csv": 8
+      "quality_issues.csv": 9
     },
-    "cross_source_xref_rows": 2337,
+    "cross_source_xref_rows": 2537,
     "dailymed": {
       "labels_ingested": 0,
       "status": "missing"
     },
     "ddinter": {
-      "base_name_collisions_after_normalization": 1,
-      "distinct_normalized_names": 1694,
-      "drugs": 1757,
-      "drugs_with_qualifier": 161,
+      "base_name_collisions_after_normalization": 3,
+      "distinct_normalized_names": 1853,
+      "drugs": 1939,
+      "drugs_with_qualifier": 215,
       "files_expected": [
         "A",
         "B",
@@ -28,7 +28,14 @@
         "V"
       ],
       "files_present": [
-        "A"
+        "A",
+        "B",
+        "D",
+        "H",
+        "L",
+        "P",
+        "R",
+        "V"
       ],
       "ids_with_multiple_names": 0,
       "legacy_json_check": {
@@ -39,22 +46,22 @@
         "json_rows_not_in_csv": 0
       },
       "level_conflicts": 0,
-      "pairs": 56367,
+      "pairs": 160235,
       "pairs_by_label": {
-        "Major": 4906,
-        "Minor": 3637,
-        "Moderate": 33057,
-        "NULL": 14767
+        "Major": 26914,
+        "Minor": 6833,
+        "Moderate": 96675,
+        "NULL": 29813
       },
       "pairs_by_status": {
-        "labeled": 41600,
-        "unknown": 14767
+        "labeled": 130422,
+        "unknown": 29813
       },
       "quarantine_reasons": {},
       "quarantined_rows": 0,
-      "raw_rows": 56367,
+      "raw_rows": 222383,
       "reversed_duplicate_pairs": 0,
-      "same_direction_duplicate_pairs": 0
+      "same_direction_duplicate_pairs": 43826
     },
     "openfda": {
       "duplicate_ids_skipped": 0,
@@ -82,101 +89,45 @@
       "unnamed_pct": 79.8
     },
     "staging_table_rows": {
+      "atc_codes": 7536,
       "dailymed_labels": 0,
       "dailymed_sections": 0,
-      "ddinter_drugs": 1757,
-      "ddinter_pair_rows": 56367,
-      "ddinter_pairs": 56367,
-      "ddinter_raw": 56367,
-      "drug_xref": 2337,
+      "ddinter_drugs": 1939,
+      "ddinter_pair_rows": 222383,
+      "ddinter_pairs": 160235,
+      "ddinter_raw": 222383,
+      "drug_atc": 2341,
+      "drug_xref": 2537,
       "feature_coverage": 13,
       "openfda_labels": 20000,
       "openfda_sections": 37197,
-      "quality_issues": 8,
-      "source_files": 26
+      "quality_issues": 9,
+      "source_files": 27
     }
+  },
+  "atc": {
+    "atc_rows": 7536,
+    "atc_substance_rows": 6215,
+    "drugs": 1939,
+    "drugs_matched": 1619
   },
   "before": {
     "legacy_backup": {
-      "clinical_rows": {
-        "audit_ledger": 0,
-        "events": 0,
-        "findings": 0,
-        "labs": 1,
-        "medications": 1,
-        "orders": 1,
-        "patients": 4
-      },
-      "drugs_by_source": {
-        "ddinter": 1684,
-        "openfda": 1442
-      },
-      "drugs_with_rxnorm": 0,
-      "integrity_check": "ok",
-      "interaction_description_equals_severity": 56367,
-      "interactions_matching_source_csv": 56367,
-      "interactions_not_in_source_csv": 0,
-      "knowledge_rows": {
-        "drugs": 3126,
-        "interaction_evidence": 56367,
-        "label_evidence": 8997,
-        "rule_versions": 0,
-        "safety_rules": 0
-      },
-      "label_evidence_duplicate_text_groups": 768,
-      "label_evidence_sections": {
-        "contraindications": 1729,
-        "dosage_and_administration": 3904,
-        "drug_interactions": 1358,
-        "use_in_specific_populations": 984,
-        "warnings_and_cautions": 1022
-      },
-      "present": true,
-      "sensitive_table_rows": {
-        "otp_records": null,
-        "user_sessions": null,
-        "users": null
-      },
-      "source_csv_pairs_missing_from_db": 0,
-      "test_fixture_patients": 4
+      "present": false
     },
     "production_db": {
-      "clinical_rows": {
-        "audit_ledger": 133,
-        "events": 43,
-        "findings": 4,
-        "labs": 14,
-        "medications": 4,
-        "orders": 1,
-        "patients": 7
-      },
-      "integrity_check": "ok",
-      "knowledge_rows": {
-        "drugs": 0,
-        "interaction_evidence": 0,
-        "label_evidence": 0,
-        "rule_versions": 0,
-        "safety_rules": 0
-      },
-      "present": true,
-      "sensitive_table_rows": {
-        "otp_records": 10,
-        "user_sessions": 12,
-        "users": 5
-      },
-      "test_fixture_patients": 4,
-      "users_with_totp_secret": 4
+      "present": false
     }
   },
   "feature_coverage": [
     {
-      "available_rows": 41600,
+      "available_rows": 130422,
       "blocker": "Unknown pairs are NOT labels and are excluded; only 'labeled' pairs are trainable",
       "category": "labels",
       "feature": "severity_label (Major/Moderate/Minor)",
       "source_needed": "DDInter (have it); 'Unknown' pairs need another source to be labelled",
       "status": "partial",
-      "total_rows": 56367
+      "total_rows": 160235
     },
     {
       "available_rows": 0,
@@ -185,15 +136,15 @@
       "feature": "negative_pairs (non-interacting drug pairs)",
       "source_needed": "A curated source of verified NON-interacting pairs (DDInter lists interacting pairs only)",
       "status": "missing",
-      "total_rows": 56367
+      "total_rows": 160235
     },
     {
-      "available_rows": 1,
-      "blocker": "Present: A. Missing files cannot be downloaded here. Build environment has no access to this source (only repo files + PyPI reachable).",
+      "available_rows": 8,
+      "blocker": "Present: A,B,D,H,L,P,R,V. Missing files cannot be downloaded here. Build environment has no access to this source (only repo files + PyPI reachable).",
       "category": "coverage",
       "feature": "ddinter_category_files",
       "source_needed": "ddinter_downloads_code_{A,B,D,H,L,P,R,V}.csv from DDInter",
-      "status": "partial",
+      "status": "available",
       "total_rows": 8
     },
     {
@@ -203,7 +154,7 @@
       "feature": "interaction_text_or_mechanism",
       "source_needed": "DDInter interaction descriptions (web/API) or DrugBank interaction text",
       "status": "missing",
-      "total_rows": 56367
+      "total_rows": 160235
     },
     {
       "available_rows": 0,
@@ -212,16 +163,16 @@
       "feature": "rxcui (RxNorm)",
       "source_needed": "RxNorm RRF (free UMLS licence) or openFDA raw `openfda.rxcui`",
       "status": "blocked",
-      "total_rows": 1757
+      "total_rows": 1939
     },
     {
-      "available_rows": 0,
-      "blocker": "Not in repo; DDInter file letters (A,B,D...) are ATC top level only for the file, not a per-drug code. Build environment has no access to this source (only repo files + PyPI reachable).",
+      "available_rows": 1619,
+      "blocker": "Exact normalised-name match to 7-character ATC substance names only (no fuzzy matching); unmatched drugs stay NULL. DDInter file letters (A,B,D...) are not per-drug ATC codes. WHO licence applies to the raw file.",
       "category": "features",
       "feature": "atc_codes",
-      "source_needed": "WHO ATC index (licensed) or RxClass / DrugBank",
-      "status": "blocked",
-      "total_rows": 1757
+      "source_needed": "WHO ATC/DDD index (data_validation/WHO_ATC-DDD*.csv)",
+      "status": "partial",
+      "total_rows": 1939
     },
     {
       "available_rows": 0,
@@ -230,7 +181,7 @@
       "feature": "cyp450_profile (substrate/inhibitor/inducer)",
       "source_needed": "FDA 'Table of Substrates, Inhibitors and Inducers' (public) or DrugBank enzymes",
       "status": "blocked",
-      "total_rows": 1757
+      "total_rows": 1939
     },
     {
       "available_rows": 0,
@@ -239,7 +190,7 @@
       "feature": "drugbank_id",
       "source_needed": "DrugBank (academic licence)",
       "status": "blocked",
-      "total_rows": 1757
+      "total_rows": 1939
     },
     {
       "available_rows": 4049,
@@ -269,13 +220,13 @@
       "total_rows": 3694
     },
     {
-      "available_rows": 523,
+      "available_rows": 550,
       "blocker": "Exact normalised-name match only; no fuzzy matching (would risk wrong links)",
       "category": "linkage",
       "feature": "ddinter_drugs_linked_to_openfda_label_text",
       "source_needed": "Better identifiers (RxCUI) would raise this above exact-name matching",
       "status": "partial",
-      "total_rows": 1757
+      "total_rows": 1939
     },
     {
       "available_rows": 0,
@@ -287,12 +238,52 @@
       "total_rows": 0
     }
   ],
-  "generated_at_utc": "2026-10-19T05:09:22Z",
+  "generated_at_utc": "2026-10-20T20:19:51Z",
   "inputs": [
     {
       "path": "data_validation/ddinter_downloads_code_A.csv",
       "rows": 56367,
       "sha256": "5bb75de36056f353b3788d5a8a71fb4e07f3bcfeb97537f73e53b371b556df0a"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_B.csv",
+      "rows": 15140,
+      "sha256": "76de5115a55587f0e822e1096b684fd3ddde058fbefcbb19896df58820ace130"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_D.csv",
+      "rows": 25681,
+      "sha256": "c0627ec39965dbe27829e4934cd20d71eb079f4e373287678737bba9423a306a"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_H.csv",
+      "rows": 11727,
+      "sha256": "f0f925f0ba1ee68c4668d3e7a6732719b34623b22a0f5d017f9090e59f63c88e"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_L.csv",
+      "rows": 65389,
+      "sha256": "f54f4486cc00344f8c86508c31c2ca3fad6d1d37ec3af5bcf609b4bbda5507ef"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_P.csv",
+      "rows": 5492,
+      "sha256": "83f8c0edb20d09ef29b8500b48f9623e208379525688ade9e70a7df2d8749d55"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_R.csv",
+      "rows": 30563,
+      "sha256": "1c39c3d4a6e41659b7a988538d7f363867592abc6f41a815de8746f6e2150574"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_V.csv",
+      "rows": 12024,
+      "sha256": "353973fb300453946aea95733e8fb52338e4b59426d2ce6ca318363d4f84f10a"
+    },
+    {
+      "path": "data_validation/WHO_ATC-DDD_2026-04-25.csv",
+      "rows": 7536,
+      "sha256": "93dac13945201f72c7f947e762bca6181b4273e1701bce090bffca04229f23ed"
     },
     {
       "path": "data_validation/openFDA/openFDA_validated_labels_part1.csv",
@@ -302,6 +293,14 @@
   ],
   "issues": [
     {
+      "affected": 43826,
+      "check_name": "same_direction_duplicate_pairs_merged",
+      "dataset": "ddinter",
+      "detail": "exact repeated pair merged",
+      "severity": "info",
+      "total": 160235
+    },
+    {
       "affected": 56367,
       "check_name": "legacy_json_description_is_severity_echo",
       "dataset": "ddinter",
@@ -310,20 +309,20 @@
       "total": 56367
     },
     {
-      "affected": 1,
+      "affected": 3,
       "check_name": "normalized_name_merges_different_base_drugs",
       "dataset": "ddinter",
-      "detail": "{\"estrone\": [\"estrone\", \"estrone sulfate\"]}",
+      "detail": "{\"edetate disodium anhydrous\": [\"edetate calcium disodium anhydrous\", \"edetate disodium anhydrous\"], \"estrone\": [\"estrone\", \"estrone sulfate\"], \"silver\": [\"silver\", \"silver nitrate\"]}",
       "severity": "error",
-      "total": 1694
+      "total": 1853
     },
     {
-      "affected": 52,
+      "affected": 72,
       "check_name": "route_or_salt_variants_share_normalized_name",
       "dataset": "ddinter",
       "detail": "e.g. 'Atropine' and 'Atropine (ophthalmic)'. Drug identity in staging is the DDInter ID, so these stay separate entities; join on ingredient_normalized if needed",
       "severity": "info",
-      "total": 1694
+      "total": 1853
     },
     {
       "affected": 15951,
@@ -368,42 +367,41 @@
   ],
   "ml_readiness": {
     "class_distribution": {
-      "Major": 4906,
-      "Minor": 3637,
-      "Moderate": 33057
+      "Major": 26914,
+      "Minor": 6833,
+      "Moderate": 96675
     },
     "conflict_pairs": 0,
-    "majority_class_share_pct": 79.5,
+    "majority_class_share_pct": 74.1,
     "missing_or_blocked_features": [
       "negative_pairs (non-interacting drug pairs)",
       "interaction_text_or_mechanism",
       "rxcui (RxNorm)",
-      "atc_codes",
       "cyp450_profile (substrate/inhibitor/inducer)",
       "drugbank_id",
       "dailymed_labels",
       "structured_renal_hepatic_dose_rules"
     ],
     "split_warning": "Random pair-level splits leak drug identity; use drug-disjoint (cold-start) splits.",
-    "trainable_labeled_pairs": 41600,
-    "unusable_unknown_pairs": 14767,
-    "verdict": "NOT READY for a feature-based severity model: labels exist (single DDInter category file) but there are no drug-level features (RxCUI, ATC, CYP450) and no interaction text. A drug-identity-only baseline is technically possible but would not generalise to unseen drugs; evaluate with drug-disjoint splits."
+    "trainable_labeled_pairs": 130422,
+    "unusable_unknown_pairs": 29813,
+    "verdict": "LIMITED READINESS for a feature-based severity model: labels exist, but drug-level features are only name text and ATC codes for the drugs that matched by exact name; RxCUI, CYP450 and interaction text are missing. Expect weak generalisation to unseen drugs; evaluate with drug-disjoint splits."
   },
   "pipeline_version": "1.0.0",
   "production_untouched": {
     "after": {
-      "aegis_rx.db": "7dfc2fd2ba0e85bab356cd13e7272d1491e1c85fa67e31b465744c35feeb208f",
+      "aegis_rx.db": null,
       "aegis_rx.db-journal": null,
-      "aegis_rx.db-shm": "b5252e0070d0922bacbfbd67cac9f26f993d15bf042058a2995401db4b8fce38",
-      "aegis_rx.db-wal": "e46d066c806d2924c5cd920862cdaa1765027be7008d158faa2f3389fc5d7d9e",
-      "aegis_rx.db.contaminated-backup": "3fb854b5767aa38e0f6fb54eaea7e416d3da5e4ddcd6269ed688dc6938e9cb4d"
+      "aegis_rx.db-shm": null,
+      "aegis_rx.db-wal": null,
+      "aegis_rx.db.contaminated-backup": null
     },
     "before": {
-      "aegis_rx.db": "7dfc2fd2ba0e85bab356cd13e7272d1491e1c85fa67e31b465744c35feeb208f",
+      "aegis_rx.db": null,
       "aegis_rx.db-journal": null,
-      "aegis_rx.db-shm": "b5252e0070d0922bacbfbd67cac9f26f993d15bf042058a2995401db4b8fce38",
-      "aegis_rx.db-wal": "e46d066c806d2924c5cd920862cdaa1765027be7008d158faa2f3389fc5d7d9e",
-      "aegis_rx.db.contaminated-backup": "3fb854b5767aa38e0f6fb54eaea7e416d3da5e4ddcd6269ed688dc6938e9cb4d"
+      "aegis_rx.db-shm": null,
+      "aegis_rx.db-wal": null,
+      "aegis_rx.db.contaminated-backup": null
     },
     "unchanged": true
   }

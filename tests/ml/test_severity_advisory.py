@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 REPO = Path(__file__).resolve().parents[2]
-ARTIFACT = REPO / "ml" / "artifacts" / "severity_baseline_v1.json"
+ARTIFACT = REPO / "ml" / "artifacts" / "severity_baseline_v2.json"
 CLEAN = REPO / "datasets" / "clean"
 
 from ml.inference import LABELS, SeverityModel, char_wb_ngrams
@@ -55,9 +55,9 @@ class TestShippedArtifact:
 
     def test_artifact_is_plain_json_with_provenance(self):
         art = json.loads(ARTIFACT.read_text(encoding="utf-8"))
-        assert art["format"] == "aegis-severity-linear-v1" and art["classifier"]["classes"] == list(LABELS)
+        assert art["format"] == "aegis-severity-linear-v2" and art["classifier"]["classes"] == list(LABELS)
         meta = art["metadata"]
-        assert meta["n_training_pairs"] == 41600 and "Unknown" in meta["training_data"]["source"]
+        assert meta["n_training_pairs"] == 130422 and "Unknown" in meta["training_data"]["source"]
         assert len(meta["training_data"]["ddinter_pairs_clean.csv_sha256"]) == 64
         assert "deciding whether two drugs interact (no negative examples)" in meta["not_for"]
 
@@ -101,7 +101,7 @@ def test_advisory_is_labelled_explained_and_honest(advisor):
     assert adv.predicted_severity in LABELS and abs(sum(adv.probabilities.values()) - 1) < 1e-3
     assert adv.explanation and adv.explanation_text and "not been clinically validated" in adv.disclaimer
     assert any("cannot tell whether two drugs interact" in l for l in adv.limitations)
-    assert adv.model.n_training_pairs == 41600
+    assert adv.model.n_training_pairs == 130422
     text = adv.explanation_text.lower()
     for forbidden in ("accuracy", "guarantee", "safe to"):
         assert forbidden not in text
@@ -240,3 +240,20 @@ class TestApi(unittest.TestCase):
             assert self.client.get(f"/findings?patient_id={self.patient_id}").status_code == 200
         finally:
             os.environ.pop("AEGIS_ML_ADVISORY", None)
+
+
+@pytest.mark.skipif(not ARTIFACT.exists(), reason="artifact not built")
+def test_v2_artifact_atc_section_is_consistent_and_symmetric():
+    art = json.loads(ARTIFACT.read_text(encoding="utf-8"))
+    atc = art["atc"]
+    vocab = set(atc["vocabulary"])
+    assert vocab and all(tok for tok in vocab)
+    for toks in atc["drug_tokens"].values():                   # every stored token exists in the vocabulary
+        assert set(toks) <= vocab
+    assert art["metadata"]["feature_comparison"], "the name-only vs name+ATC comparison must ship with the model"
+    model = SeverityModel.load(ARTIFACT)
+    names = [n for n in list(atc["by_name"])[:6]]
+    assert len(names) >= 2
+    a, b = names[0], names[1]
+    pa, pb = model.predict_proba(a, b), model.predict_proba(b, a)
+    assert np.allclose(pa, pb, atol=1e-12)

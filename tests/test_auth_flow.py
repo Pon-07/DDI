@@ -91,7 +91,7 @@ class TestAuthFlow(unittest.TestCase):
         """Verify OTP request in demo mode returns preview code for instant offline testing."""
         res = self.client.post(
             "/auth/otp/request",
-            json={"phone_number": "+15550192831", "demo_mode": True},
+            json={"phone_number": "+15555550101", "demo_mode": True},
         )
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -130,12 +130,12 @@ class TestAuthFlow(unittest.TestCase):
     def test_successful_otp_verification_creates_session_and_routes(self):
         """Verify OTP verification creates session token, sets last_login_at, and returns role dashboard route."""
         # 1. Request OTP for Doctor
-        self.client.post("/auth/otp/request", json={"phone_number": "+15550192831", "demo_mode": True})
+        self.client.post("/auth/otp/request", json={"phone_number": "+15555550101", "demo_mode": True})
 
         # 2. Verify OTP
         res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192831", "otp_code": self.demo_otp, "role": "Doctor"},
+            json={"phone_number": "+15555550101", "otp_code": self.demo_otp, "role": "Doctor"},
         )
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -144,7 +144,7 @@ class TestAuthFlow(unittest.TestCase):
         self.assertTrue(data["session_token"].startswith("aegis_sess_"))
         self.assertEqual(data["role"], "Doctor")
         self.assertEqual(data["dashboard_url"], "/app/dashboard/doctor")
-        self.assertEqual(data["user"]["full_name"], "Dr. Sarah Lin, MD")
+        self.assertEqual(data["user"]["full_name"], "Demo Doctor")
 
         # 3. Check session in DB
         session_token = data["session_token"]
@@ -155,11 +155,11 @@ class TestAuthFlow(unittest.TestCase):
 
     def test_invalid_otp_fails_and_decrements_attempts(self):
         """Verify invalid OTP fails with 400 Bad Request and logs audit failure."""
-        self.client.post("/auth/otp/request", json={"phone_number": "+15550192832", "demo_mode": False})
+        self.client.post("/auth/otp/request", json={"phone_number": "+15555550102", "demo_mode": False})
 
         res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192832", "otp_code": "000000"},
+            json={"phone_number": "+15555550102", "otp_code": "000000"},
         )
         self.assertEqual(res.status_code, 400)
         self.assertIn("Invalid or expired verification code", res.json()["detail"])
@@ -167,10 +167,10 @@ class TestAuthFlow(unittest.TestCase):
     def test_role_based_routing_for_all_four_roles(self):
         """Verify all 4 roles receive appropriate credentials and dashboard routes."""
         test_cases = [
-            ("+15550192831", "Doctor", "/app/dashboard/doctor", "Dr. Sarah Lin, MD"),
-            ("+15550192832", "Nurse", "/app/dashboard/nurse", "Elena Rostova, RN"),
-            ("+15550192833", "Clinical Pharmacist", "/app/dashboard/clinical-pharmacist", "Marcus Vance, PharmD, BCPS"),
-            ("+15550192834", "Administrator", "/app/dashboard/administrator", "Arthur Pendelton, MS, CPHIMS"),
+            ("+15555550101", "Doctor", "/app/dashboard/doctor", "Demo Doctor"),
+            ("+15555550102", "Nurse", "/app/dashboard/nurse", "Demo Nurse"),
+            ("+15555550103", "Clinical Pharmacist", "/app/dashboard/clinical-pharmacist", "Demo Pharmacist"),
+            ("+15555550104", "Administrator", "/app/dashboard/administrator", "Demo Administrator"),
         ]
 
         for phone, role, expected_url, expected_name in test_cases:
@@ -188,10 +188,10 @@ class TestAuthFlow(unittest.TestCase):
     def test_authenticated_profile_and_logout(self):
         """Verify /auth/me returns current user profile and /auth/logout invalidates the session."""
         # Login
-        self.client.post("/auth/otp/request", json={"phone_number": "+15550192831", "demo_mode": True})
+        self.client.post("/auth/otp/request", json={"phone_number": "+15555550101", "demo_mode": True})
         verify_res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192831", "otp_code": self.demo_otp, "role": "Doctor"},
+            json={"phone_number": "+15555550101", "otp_code": self.demo_otp, "role": "Doctor"},
         )
         token = verify_res.json()["session_token"]
 
@@ -201,7 +201,7 @@ class TestAuthFlow(unittest.TestCase):
             headers={"Authorization": f"Bearer {token}"},
         )
         self.assertEqual(me_res.status_code, 200)
-        self.assertEqual(me_res.json()["full_name"], "Dr. Sarah Lin, MD")
+        self.assertEqual(me_res.json()["full_name"], "Demo Doctor")
 
         # Call /auth/logout
         logout_res = self.client.post(
@@ -220,7 +220,7 @@ class TestAuthFlow(unittest.TestCase):
 
     def test_audit_ledger_records_auth_lifecycle(self):
         """Verify that every auth event (OTP request, login success, login fail, logout) is recorded in SHA-256 audit ledger."""
-        phone = "+15550192831"
+        phone = "+15555550101"
 
         # 1. Request OTP
         self.client.post("/auth/otp/request", json={"phone_number": phone, "demo_mode": True})

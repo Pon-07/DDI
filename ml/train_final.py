@@ -24,7 +24,8 @@ import pandas as pd
 import scipy.sparse as sp
 import sklearn
 from sklearn.dummy import DummyClassifier
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.preprocessing import normalize
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score, f1_score, recall_score
 
@@ -37,7 +38,7 @@ MAX_FEATURES = 4000
 C = 1.0
 BANDS = [(0.0, 0.5, "low"), (0.5, 0.7, "medium"), (0.7, 1.01, "high")]
 REGIMES = ("both_seen", "one_unseen", "both_unseen")
-MODEL_VERSION = "severity-baseline-v1"
+MODEL_VERSION = "severity-baseline-v2"
 
 
 def _sha256(path: Path) -> str:
@@ -48,19 +49,46 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _fit(pairs: pd.DataFrame, drugs: pd.DataFrame, train_idx: np.ndarray, seed: int = 0):
+class FeatureSpace:
+    """Per-drug features fit on TRAIN drugs only: char n-gram TF-IDF of the name, optionally + binary ATC level 1-4
+    indicators (L2-normalised). A pair is [a+b, a*b], symmetric in (A, B)."""
+
+    def __init__(self, use_atc: bool):
+        self.use_atc = use_atc
+        self.name_vec = TfidfVectorizer(analyzer="char_wb", ngram_range=NGRAM_RANGE, max_features=MAX_FEATURES,
+                                        lowercase=True, sublinear_tf=True)
+        self.atc_vec = CountVectorizer(binary=True, token_pattern=r"\S+", lowercase=False)
+
+    def fit(self, drugs: pd.DataFrame, ids) -> "FeatureSpace":
+        self.name_vec.fit(drugs.loc[ids, "name_text"])
+        toks = drugs.loc[ids, "atc_tokens"]
+        if self.use_atc and (toks != "").any():
+            self.atc_vec.fit(toks)
+        else:
+            self.use_atc = False
+        return self
+
+    def drug_matrix(self, drugs: pd.DataFrame, ids) -> sp.csr_matrix:
+        parts = [self.name_vec.transform(drugs.loc[ids, "name_text"])]
+        if self.use_atc:
+            parts.append(sp.csr_matrix(normalize(self.atc_vec.transform(drugs.loc[ids, "atc_tokens"]).astype(float))))
+        return sp.hstack(parts, format="csr")
+
+    def X(self, pairs: pd.DataFrame, drugs: pd.DataFrame) -> sp.csr_matrix:
+        a, b = self.drug_matrix(drugs, pairs["id_lo"]), self.drug_matrix(drugs, pairs["id_hi"])
+        return sp.hstack([a + b, a.multiply(b)], format="csr")
+
+
+def _fit(pairs: pd.DataFrame, drugs: pd.DataFrame, train_idx: np.ndarray, seed: int = 0, use_atc: bool = False):
     ids = sorted(set(pairs.iloc[train_idx]["id_lo"]) | set(pairs.iloc[train_idx]["id_hi"]))
-    vec = TfidfVectorizer(analyzer="char_wb", ngram_range=NGRAM_RANGE, max_features=MAX_FEATURES,
-                          lowercase=True, sublinear_tf=True).fit(drugs.loc[ids, "name_text"])
+    fs = FeatureSpace(use_atc).fit(drugs, ids)
     clf = LogisticRegression(max_iter=400, class_weight="balanced", C=C)
-    clf.fit(_X(pairs.iloc[train_idx], drugs, vec), pairs.iloc[train_idx]["y"].to_numpy())
-    return vec, clf
+    clf.fit(_X(pairs.iloc[train_idx], drugs, fs), pairs.iloc[train_idx]["y"].to_numpy())
+    return fs, clf
 
 
-def _X(pairs: pd.DataFrame, drugs: pd.DataFrame, vec) -> sp.csr_matrix:
-    a = vec.transform(drugs.loc[pairs["id_lo"], "name_text"])
-    b = vec.transform(drugs.loc[pairs["id_hi"], "name_text"])
-    return sp.hstack([a + b, a.multiply(b)], format="csr")
+def _X(pairs: pd.DataFrame, drugs: pd.DataFrame, fs: "FeatureSpace") -> sp.csr_matrix:
+    return fs.X(pairs, drugs)
 
 
 def regime_split(pairs: pd.DataFrame, seed: int, drug_frac: float = 0.2, pair_frac: float = 0.2):
@@ -93,12 +121,12 @@ def _metrics(y, p) -> Dict:
     }
 
 
-def cross_validate(pairs, drugs, seeds: int) -> Dict:
+def cross_validate(pairs, drugs, seeds: int, use_atc: bool = False) -> Dict:
     per_regime: Dict[str, Dict[str, List]] = {r: {"model": [], "majority": [], "stratified": []} for r in REGIMES}
     pooled = {r: {"y": [], "pred": [], "conf": []} for r in REGIMES}
     for seed in range(seeds):
         train, tests = regime_split(pairs, seed)
-        vec, clf = _fit(pairs, drugs, train, seed)
+        vec, clf = _fit(pairs, drugs, train, seed, use_atc)
         y_tr = pairs.iloc[train]["y"].to_numpy()
         maj = DummyClassifier(strategy="most_frequent").fit(np.zeros((len(train), 1)), y_tr)
         strat = DummyClassifier(strategy="stratified", random_state=seed).fit(np.zeros((len(train), 1)), y_tr)
@@ -137,9 +165,11 @@ def cross_validate(pairs, drugs, seeds: int) -> Dict:
     return {"summary": summary, "reliability": reliability}
 
 
-def build_artifact(pairs, drugs, clean_dir: Path, seeds: int, cv: Dict) -> dict:
+def build_artifact(pairs, drugs, clean_dir: Path, seeds: int, cv: Dict, use_atc: bool = False,
+                   who_lookup=None, comparison=None) -> dict:
     all_idx = np.arange(len(pairs))
-    vec, clf = _fit(pairs, drugs, all_idx)
+    fs, clf = _fit(pairs, drugs, all_idx, 0, use_atc)
+    vec = fs.name_vec
     vocab = {t: int(i) for t, i in vec.vocabulary_.items()}
     training_drugs = sorted(set(drugs.loc[sorted(set(pairs["id_lo"]) | set(pairs["id_hi"])), "name_text"]))
     artifact = {
@@ -156,7 +186,7 @@ def build_artifact(pairs, drugs, clean_dir: Path, seeds: int, cv: Dict) -> dict:
             "training_data": {
                 "ddinter_pairs_clean.csv_sha256": _sha256(clean_dir / "ddinter_pairs_clean.csv"),
                 "ddinter_drugs_clean.csv_sha256": _sha256(clean_dir / "ddinter_drugs_clean.csv"),
-                "source": "DDInter category A only; `Unknown` pairs excluded (not labels)",
+                "source": "",
             },
             "intended_use": "advisory estimate of the severity of an interaction that is already documented",
             "not_for": ["deciding whether two drugs interact (no negative examples)",
@@ -173,7 +203,21 @@ def build_artifact(pairs, drugs, clean_dir: Path, seeds: int, cv: Dict) -> dict:
         "training_pairs": _training_pairs(pairs, drugs, training_drugs),
         "validation": cv,
     }
-    return artifact, vec, clf
+    if fs.use_atc:
+        in_train = drugs.loc[sorted(set(pairs["id_lo"]) | set(pairs["id_hi"]))]
+        artifact["atc"] = {
+            "vocabulary": {t: int(i) for t, i in fs.atc_vec.vocabulary_.items()},
+            "drug_tokens": {n: g.split() for n, g in zip(in_train["name_text"], in_train["atc_tokens"]) if g},
+            "by_name": who_lookup or {},
+        }
+        artifact["metadata"]["features"] = ("TF-IDF of character 3-4-grams of the normalised ingredient name + binary "
+                                            "WHO ATC level 1-4 indicators (exact-name match; zeros when unknown); pair = [a+b, a*b]")
+        artifact["metadata"]["training_data"]["source"] = "DDInter categories A,B,D,H,L,P,R,V; `Unknown` pairs excluded (not labels)"
+    else:
+        artifact["metadata"]["training_data"]["source"] = "DDInter categories A,B,D,H,L,P,R,V; `Unknown` pairs excluded (not labels)"
+    if comparison is not None:
+        artifact["metadata"]["feature_comparison"] = comparison
+    return artifact, fs, clf
 
 
 def _training_pairs(pairs, drugs, training_drugs) -> list:
@@ -205,7 +249,7 @@ def render_md(art: dict, gap: float) -> str:
     m, v = art["metadata"], art["validation"]["summary"]
     L = [f"# {m['model_name']} - validation report", "",
          f"Trained {m['trained_at_utc']} on **{m['n_training_pairs']:,}** labelled DDInter pairs ({m['n_training_drugs']:,} drugs): {m['class_counts']}.",
-         "", "**Advisory only. Not clinically validated.** Features are drug-name text only (no RxCUI/ATC/CYP450/interaction text). "
+         "", "**Advisory only. Not clinically validated.** Features: " + m["features"] + ". No RxCUI/CYP450/interaction text. "
          "The model estimates severity for an interaction that already exists; it was trained without negative examples "
          "and cannot tell whether two drugs interact. Chance macro-F1 for 3 classes is ~0.33.", "",
          "## Held-out results (mean ± std over %d seeds)" % m["hyperparameters"]["validation_seeds"], "",
@@ -217,6 +261,13 @@ def render_md(art: dict, gap: float) -> str:
         L.append(f"| `{r}` | {meaning[r]} | {s['macro_f1']['mean']:.3f} ± {s['macro_f1']['std']:.3f} | "
                  f"{v[r]['majority']['macro_f1']['mean']:.3f} | {v[r]['stratified']['macro_f1']['mean']:.3f} | "
                  f"{s['recall']['Minor']:.2f} / {s['recall']['Moderate']:.2f} / {s['recall']['Major']:.2f} |")
+    cmp_ = m.get("feature_comparison")
+    if cmp_:
+        L += ["", "## Feature comparison (same splits, same seeds)", "",
+              "| features | both_seen | one_unseen | both_unseen (cold start) |", "|---|---|---|---|"]
+        for name, res in cmp_["results"].items():
+            L.append(f"| {name} | " + " | ".join(f"{res[r]['mean']:.3f} ± {res[r]['std']:.3f}" for r in REGIMES) + " |")
+        L += ["", f"Decision: **{cmp_['decision']}**", ""]
     L += ["", "## Reliability of a prediction (pooled held-out pairs)", "",
           "Share of held-out pairs that truly had the predicted label, by confidence band, next to how common that label is.", ""]
     for r in REGIMES:
@@ -229,20 +280,65 @@ def render_md(art: dict, gap: float) -> str:
           f"- Runtime inference (`ml/inference.py`, numpy) matches scikit-learn to {gap:.1e} and is exactly symmetric in (A, B).",
           "- The shipped weights are fit on all labelled pairs; they have no held-out set of their own.",
           "- `both_seen` numbers reflect drug-identity signal; they say nothing about pharmacology.",
-          "- Only DDInter category A is available (1 of 8 files), so coverage of drug classes is partial.", ""]
+          "- ATC codes come from an exact-name match to the WHO ATC/DDD index; drugs without a match have no ATC features.",
+          "- All 8 DDInter category files are used, but DDInter is still the only label source and has no negative pairs.", ""]
     return "\n".join(L)
+
+
+def _atc_wins(results) -> bool:
+    base, atc_ = results["name n-grams only"], results["name n-grams + ATC levels 1-4"]
+    cold = atc_["both_unseen"]["mean"] - base["both_unseen"]["mean"] > max(atc_["both_unseen"]["std"], base["both_unseen"]["std"])
+    no_loss = all(atc_[r]["mean"] >= base[r]["mean"] - max(atc_[r]["std"], base[r]["std"]) for r in REGIMES)
+    return bool(cold and no_loss)
+
+
+def _default_atc_file():
+    found = sorted(Path("data_validation").glob("WHO_ATC-DDD*.csv"))
+    return found[-1] if found else None
+
+
+def _who_lookup(path):
+    """normalised ATC substance name -> ATC level 1-4 tokens, for drugs that are not in DDInter (cold start).
+    Derived from the WHO index; check WHO's terms before redistributing the artifact."""
+    if path is None or not Path(path).exists():
+        return {}
+    from data_pipeline.atc import read_atc
+    from data_pipeline.names import normalize_name
+    from ml.data import atc_tokens
+    out = {}
+    for r in read_atc(path):
+        if len(r["atc_code"]) == 7:
+            key = normalize_name(r["atc_name"])
+            if key:
+                out.setdefault(key, set()).update(atc_tokens(r["atc_code"]).split())
+    return {k: sorted(v) for k, v in sorted(out.items())}
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--clean-dir", type=Path, default=Path("datasets/clean"))
-    ap.add_argument("--artifact", type=Path, default=Path("ml/artifacts/severity_baseline_v1.json"))
+    ap.add_argument("--artifact", type=Path, default=Path("ml/artifacts/severity_baseline_v2.json"))
+    ap.add_argument("--features", choices=["auto", "name", "name_atc"], default="auto",
+                    help="auto: ship name+ATC only if it beats name-only on cold start by more than one std and does not lose elsewhere")
     ap.add_argument("--report-dir", type=Path, default=Path("ml/reports"))
     ap.add_argument("--seeds", type=int, default=5)
+    ap.add_argument("--atc-file", type=Path, default=None, help="WHO ATC/DDD csv used for the name->ATC lookup embedded in the artifact")
     a = ap.parse_args(argv)
     pairs, drugs = load_pairs(a.clean_dir), build_drug_table(a.clean_dir)
-    cv = cross_validate(pairs, drugs, a.seeds)
-    artifact, vec, clf = build_artifact(pairs, drugs, a.clean_dir, a.seeds, cv)
+    cv_name = cross_validate(pairs, drugs, a.seeds, use_atc=False)
+    has_atc = bool((drugs["atc_tokens"] != "").any())
+    cv_atc = cross_validate(pairs, drugs, a.seeds, use_atc=True) if has_atc else None
+    results = {"name n-grams only": {r: cv_name["summary"][r]["model"]["macro_f1"] for r in REGIMES}}
+    if cv_atc:
+        results["name n-grams + ATC levels 1-4"] = {r: cv_atc["summary"][r]["model"]["macro_f1"] for r in REGIMES}
+    use_atc = a.features == "name_atc" or (a.features == "auto" and cv_atc is not None and _atc_wins(results))
+    if a.features == "name_atc" and not has_atc:
+        raise SystemExit("no ATC data in datasets/clean/ddinter_drugs_clean.csv")
+    decision = ("ship name + ATC" if use_atc else "ship name-only") + f" (--features {a.features})"
+    cv = cv_atc if use_atc else cv_name
+    who_lookup = _who_lookup(a.atc_file or _default_atc_file()) if use_atc else None
+    artifact, vec, clf = build_artifact(pairs, drugs, a.clean_dir, a.seeds, cv, use_atc=use_atc, who_lookup=who_lookup,
+                                        comparison={"results": results, "decision": decision})
     gap = verify_equivalence(artifact, pairs, drugs, vec, clf)
     a.artifact.parent.mkdir(parents=True, exist_ok=True)
     a.artifact.write_text(json.dumps(artifact, separators=(",", ":")), encoding="utf-8")

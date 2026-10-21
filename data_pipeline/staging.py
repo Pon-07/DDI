@@ -117,6 +117,17 @@ CREATE TABLE dailymed_sections (
 );
 
 -- ===== cross-source link (exact normalised-name match only) ================================
+CREATE TABLE atc_codes (
+    row_id INTEGER PRIMARY KEY AUTOINCREMENT,  -- the WHO file repeats a code once per DDD/route row; kept verbatim
+    atc_code TEXT NOT NULL, atc_name TEXT NOT NULL, ddd TEXT, uom TEXT, adm_r TEXT, note TEXT
+);
+CREATE INDEX idx_atc_codes_code ON atc_codes(atc_code);
+CREATE TABLE drug_atc (
+    ddinter_id TEXT NOT NULL REFERENCES ddinter_drugs(ddinter_id),
+    atc_code TEXT NOT NULL,
+    match_type TEXT NOT NULL CHECK (match_type = 'exact_normalized_name'),
+    PRIMARY KEY (ddinter_id, atc_code)
+);
 CREATE TABLE drug_xref (
     ddinter_id TEXT NOT NULL REFERENCES ddinter_drugs(ddinter_id),
     label_id   TEXT NOT NULL REFERENCES openfda_labels(label_id),

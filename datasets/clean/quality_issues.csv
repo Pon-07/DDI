@@ -1,7 +1,8 @@
 dataset,check_name,severity,affected,total,detail
+ddinter,same_direction_duplicate_pairs_merged,info,43826,160235,exact repeated pair merged
 ddinter,legacy_json_description_is_severity_echo,warning,56367,56367,interaction_description == severity in legacy JSON; not carried into clean tables
-ddinter,normalized_name_merges_different_base_drugs,error,1,1694,"{""estrone"": [""estrone"", ""estrone sulfate""]}"
-ddinter,route_or_salt_variants_share_normalized_name,info,52,1694,"e.g. 'Atropine' and 'Atropine (ophthalmic)'. Drug identity in staging is the DDInter ID, so these stay separate entities; join on ingredient_normalized if needed"
+ddinter,normalized_name_merges_different_base_drugs,error,3,1853,"{""edetate disodium anhydrous"": [""edetate calcium disodium anhydrous"", ""edetate disodium anhydrous""], ""estrone"": [""estrone"", ""estrone sulfate""], ""silver"": [""silver"", ""silver nitrate""]}"
+ddinter,route_or_salt_variants_share_normalized_name,info,72,1853,"e.g. 'Atropine' and 'Atropine (ophthalmic)'. Drug identity in staging is the DDInter ID, so these stay separate entities; join on ingredient_normalized if needed"
 openfda,labels_without_drug_name,error,15951,20000,brand_name and generic_name both empty in source extract; names not inferred
 openfda,multi_product_names,warning,7,20000,"name field holds several products joined by ' | '; kept verbatim, not split"
 openfda,names_longer_than_100_chars,warning,34,20000,typically combination / homeopathic products; will not match single-drug names

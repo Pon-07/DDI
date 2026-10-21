@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from ml.inference import LABELS, SeverityModel
 
-DEFAULT_ARTIFACT = Path(__file__).resolve().parent / "artifacts" / "severity_baseline_v1.json"
+DEFAULT_ARTIFACT = Path(__file__).resolve().parent / "artifacts" / "severity_baseline_v2.json"
 
 DISCLAIMER = ("Machine-learning ESTIMATE, not a clinical finding. It has not been clinically validated and must not "
               "be used to override, downgrade or replace the rule-based safety findings or a pharmacist's judgement.")

@@ -24,7 +24,7 @@ class TestSMSProviders(unittest.TestCase):
         """Verify local demo provider sends simulated SMS and captures in-memory history."""
         provider = LocalDemoOTPProvider(demo_mode=True)
         res = provider.send_otp(
-            phone_number="+15550192831",
+            phone_number="+15555550101",
             otp_code="849201",
         )
 
@@ -37,16 +37,16 @@ class TestSMSProviders(unittest.TestCase):
         history = provider.get_recent_dispatches()
         self.assertEqual(len(history), 1)
         self.assertEqual(history[0]["otp_code"], "849201")
-        self.assertEqual(history[0]["phone_number"], "+15550192831")
+        self.assertEqual(history[0]["phone_number"], "+15555550101")
 
         # Check latest OTP helper
-        self.assertEqual(provider.get_last_otp("+15550192831"), "849201")
+        self.assertEqual(provider.get_last_otp("+15555550101"), "849201")
 
     def test_local_provider_non_demo_mode_masks_preview(self):
         """Verify local provider in non-demo mode does not leak preview_otp in result."""
         provider = LocalDemoOTPProvider(demo_mode=False)
         res = provider.send_otp(
-            phone_number="+15550192832",
+            phone_number="+15555550102",
             otp_code="392810",
         )
         self.assertTrue(res.success)
@@ -91,7 +91,7 @@ class TestSMSProviders(unittest.TestCase):
 
         # Sending without credentials returns mock fallback
         res = twilio.send_otp(
-            phone_number="+15550192834",
+            phone_number="+15555550104",
             otp_code="492019",
         )
         self.assertTrue(res.success)

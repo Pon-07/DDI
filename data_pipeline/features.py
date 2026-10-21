@@ -58,9 +58,10 @@ def compute_feature_coverage(
         "RxNorm RRF (free UMLS licence) or openFDA raw `openfda.rxcui`",
         "No RxNorm file in repo; raw openFDA JSON is a Git-LFS pointer. " + NETWORK_BLOCK, blocked=True)
     add("atc_codes", "features", _scalar(conn, "SELECT COUNT(atc_codes) FROM ddinter_drugs"), drugs,
-        "WHO ATC index (licensed) or RxClass / DrugBank",
-        "Not in repo; DDInter file letters (A,B,D...) are ATC top level only for the file, not a per-drug code. "
-        + NETWORK_BLOCK, blocked=True)
+        "WHO ATC/DDD index (data_validation/WHO_ATC-DDD*.csv)",
+        "Exact normalised-name match to 7-character ATC substance names only (no fuzzy matching); unmatched drugs "
+        "stay NULL. DDInter file letters (A,B,D...) are not per-drug ATC codes. WHO licence applies to the raw file.",
+        blocked=True)
     add("cyp450_profile (substrate/inhibitor/inducer)", "features",
         _scalar(conn, "SELECT COUNT(cyp_profile) FROM ddinter_drugs"), drugs,
         "FDA 'Table of Substrates, Inhibitors and Inducers' (public) or DrugBank enzymes",
@@ -101,10 +102,9 @@ def ml_readiness(conn: sqlite3.Connection, features: List[Dict[str, Any]]) -> Di
             "SELECT COUNT(*) FROM ddinter_pairs WHERE label_status='conflict'").fetchone()[0]),
         "missing_or_blocked_features": missing,
         "verdict": (
-            "NOT READY for a feature-based severity model: labels exist (single DDInter category file) "
-            "but there are no drug-level features (RxCUI, ATC, CYP450) and no interaction text. "
-            "A drug-identity-only baseline is technically possible but would not generalise to unseen "
-            "drugs; evaluate with drug-disjoint splits."
+            "LIMITED READINESS for a feature-based severity model: labels exist, but drug-level features are only "
+            "name text and ATC codes for the drugs that matched by exact name; RxCUI, CYP450 and interaction text "
+            "are missing. Expect weak generalisation to unseen drugs; evaluate with drug-disjoint splits."
         ),
         "split_warning": "Random pair-level splits leak drug identity; use drug-disjoint (cold-start) splits.",
     }

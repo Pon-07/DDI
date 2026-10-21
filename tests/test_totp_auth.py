@@ -103,9 +103,10 @@ class TestTOTPAuth(unittest.TestCase):
         self.assertEqual(data["phone_number"], phone)
         self.assertEqual(len(data["secret_base32"]), 32)
         self.assertIn(" ", data["secret_formatted"])
-        self.assertTrue(data["otpauth_uri"].startswith("otpauth://totp/MICROMEDX:"))
+        from urllib.parse import quote
+        self.assertTrue(data["otpauth_uri"].startswith(f"otpauth://totp/{quote(AuthConfig.TOTP_ISSUER)}:"))
         self.assertIn("secret=" + data["secret_base32"], data["otpauth_uri"])
-        self.assertIn("issuer=MICROMEDX", data["otpauth_uri"])
+        self.assertIn(f"issuer={quote(AuthConfig.TOTP_ISSUER)}", data["otpauth_uri"])
         self.assertTrue(data["qr_code_data_uri"].startswith("data:image/png;base64,"))
 
         # Check DB state: User exists but totp_enabled is still False until verified
@@ -153,10 +154,10 @@ class TestTOTPAuth(unittest.TestCase):
     def test_totp_login_for_all_four_roles(self):
         """Verify Doctor, Nurse, Pharmacist, and Admin can authenticate via TOTP and reach their dashboards."""
         role_map = {
-            "+15550192831": ("/app/dashboard/doctor", "Doctor"),
-            "+15550192832": ("/app/dashboard/nurse", "Nurse"),
-            "+15550192833": ("/app/dashboard/clinical-pharmacist", "Clinical Pharmacist"),
-            "+15550192834": ("/app/dashboard/administrator", "Administrator"),
+            "+15555550101": ("/app/dashboard/doctor", "Doctor"),
+            "+15555550102": ("/app/dashboard/nurse", "Nurse"),
+            "+15555550103": ("/app/dashboard/clinical-pharmacist", "Clinical Pharmacist"),
+            "+15555550104": ("/app/dashboard/administrator", "Administrator"),
         }
 
         for phone, (expected_url, expected_role) in role_map.items():
@@ -190,14 +191,14 @@ class TestTOTPAuth(unittest.TestCase):
         """Verify invalid TOTP codes are rejected and do not create a session."""
         res = self.client.post(
             "/auth/totp/verify",
-            json={"phone_number": "+15550192831", "totp_code": "999999"},
+            json={"phone_number": "+15555550101", "totp_code": "999999"},
         )
         self.assertEqual(res.status_code, 400)
         self.assertIn("Invalid or expired", res.json()["detail"])
 
     def test_totp_replay_protection(self):
         """Verify the exact same TOTP code cannot be used twice in the same 30s timestep window."""
-        phone = "+15550192831"
+        phone = "+15555550101"
         user = self.db.query(User).filter(User.phone_number == phone).first()
         totp = pyotp.TOTP(user.totp_secret, interval=30, digits=6)
         code = totp.now()
@@ -219,7 +220,7 @@ class TestTOTPAuth(unittest.TestCase):
 
     def test_totp_expired_code_rejection(self):
         """Verify codes generated with timestamps from 5 minutes ago are rejected."""
-        phone = "+15550192831"
+        phone = "+15555550101"
         user = self.db.query(User).filter(User.phone_number == phone).first()
         totp = pyotp.TOTP(user.totp_secret, interval=30, digits=6)
 
@@ -236,13 +237,13 @@ class TestTOTPAuth(unittest.TestCase):
     def test_totp_status_and_demo_endpoints(self):
         """Verify status and presentation helper endpoints."""
         # Status endpoint
-        res_status = self.client.get("/auth/totp/status/+15550192831")
+        res_status = self.client.get("/auth/totp/status/+15555550101")
         self.assertEqual(res_status.status_code, 200)
         self.assertTrue(res_status.json()["totp_enabled"])
         self.assertEqual(res_status.json()["user_role"], "Doctor")
 
         # Demo helper endpoint
-        res_demo = self.client.get("/auth/totp/demo-code/+15550192831")
+        res_demo = self.client.get("/auth/totp/demo-code/+15555550101")
         self.assertEqual(res_demo.status_code, 200)
         data = res_demo.json()
         self.assertEqual(len(data["code"]), 6)
@@ -250,7 +251,7 @@ class TestTOTPAuth(unittest.TestCase):
 
     def test_totp_audit_ledger_recording(self):
         """Verify tamper-evident SHA-256 cryptographic audit records are generated for TOTP events."""
-        phone = "+15550192831"
+        phone = "+15555550101"
         user = self.db.query(User).filter(User.phone_number == phone).first()
         totp = pyotp.TOTP(user.totp_secret)
         code = totp.now()
@@ -273,7 +274,7 @@ class TestTOTPAuth(unittest.TestCase):
 
     def test_totp_session_logout(self):
         """Verify user can log out after TOTP authentication, invalidating the session."""
-        phone = "+15550192831"
+        phone = "+15555550101"
         user = self.db.query(User).filter(User.phone_number == phone).first()
         code = pyotp.TOTP(user.totp_secret).now()
 

@@ -19,7 +19,8 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import numpy as np
 
 LABELS = ("Minor", "Moderate", "Major")
-ARTIFACT_FORMAT = "aegis-severity-linear-v1"
+ARTIFACT_FORMAT = "aegis-severity-linear-v2"
+SUPPORTED_FORMATS = ("aegis-severity-linear-v1", ARTIFACT_FORMAT)
 _WS = re.compile(r"\s\s+")
 
 
@@ -61,7 +62,7 @@ class PairPrediction:
 
 class SeverityModel:
     def __init__(self, artifact: dict):
-        if artifact.get("format") != ARTIFACT_FORMAT:
+        if artifact.get("format") not in SUPPORTED_FORMATS:
             raise ValueError(f"Unsupported model artifact format: {artifact.get('format')!r}")
         vec = artifact["vectorizer"]
         self.meta = artifact["metadata"]
@@ -72,11 +73,20 @@ class SeverityModel:
         for term, idx in self.vocab.items():
             self.terms[idx] = term
         self.idf = np.asarray(vec["idf"], dtype=np.float64)
-        self.coef = np.asarray(artifact["classifier"]["coef"], dtype=np.float64)       # (3, 2V)
+        atc = artifact.get("atc") or {}
+        self.atc_vocab: Dict[str, int] = atc.get("vocabulary", {})
+        self.atc_terms: List[str] = [""] * len(self.atc_vocab)
+        for tok, idx in self.atc_vocab.items():
+            self.atc_terms[idx] = "ATC:" + tok
+        self.atc_drug_tokens: Dict[str, List[str]] = atc.get("drug_tokens", {})   # training drugs, as trained
+        self.atc_by_name: Dict[str, List[str]] = atc.get("by_name", {})           # any drug named in the ATC index
+        self.K = len(self.atc_vocab)
+        self.coef = np.asarray(artifact["classifier"]["coef"], dtype=np.float64)       # (3, 2(V+K))
         self.intercept = np.asarray(artifact["classifier"]["intercept"], dtype=np.float64)
         self.classes = tuple(artifact["classifier"]["classes"])
         self.V = len(self.vocab)
-        if self.coef.shape != (len(self.classes), 2 * self.V) or tuple(self.classes) != LABELS:
+        self.D = self.V + self.K
+        if self.coef.shape != (len(self.classes), 2 * self.D) or tuple(self.classes) != LABELS:
             raise ValueError("Model artifact is internally inconsistent")
         names = artifact.get("training_drugs", [])
         self.seen_drugs = frozenset(names)
@@ -89,6 +99,26 @@ class SeverityModel:
             return cls(json.load(fh))
 
     # --- features -------------------------------------------------------------------------------
+    def atc_vec(self, name_text: str) -> np.ndarray:
+        """Binary ATC level 1-4 indicators (L2-normalised); zeros if the drug has no known ATC code."""
+        vec = np.zeros(self.K, dtype=np.float64)
+        toks = self.atc_drug_tokens.get(name_text)
+        if toks is None:
+            toks = self.atc_by_name.get(name_text, [])
+        for t in toks:
+            idx = self.atc_vocab.get(t)
+            if idx is not None:
+                vec[idx] = 1.0
+        norm = float(np.linalg.norm(vec))
+        return vec / norm if norm > 0 else vec
+
+    def drug_vec(self, name_text: str) -> np.ndarray:
+        v = self.tfidf(name_text)
+        return np.concatenate([v, self.atc_vec(name_text)]) if self.K else v
+
+    def has_atc(self, name_text: str) -> bool:
+        return bool(self.K and self.atc_vec(name_text).any())
+
     def tfidf(self, name_text: str) -> np.ndarray:
         """Sublinear-tf * idf, L2-normalised; identical to the training vectoriser."""
         vec = np.zeros(self.V, dtype=np.float64)
@@ -112,24 +142,25 @@ class SeverityModel:
         return e / e.sum()
 
     def predict_proba(self, name_a: str, name_b: str) -> np.ndarray:
-        return self._softmax(self._logits(self.tfidf(name_a), self.tfidf(name_b)))
+        return self._softmax(self._logits(self.drug_vec(name_a), self.drug_vec(name_b)))
 
     # --- prediction + explanation ---------------------------------------------------------------
     def predict(self, name_a: str, name_b: str, top_k: int = 5) -> PairPrediction:
-        a, b = self.tfidf(name_a), self.tfidf(name_b)
+        a, b = self.drug_vec(name_a), self.drug_vec(name_b)
         logits = self._logits(a, b)
         proba = self._softmax(logits)
         order = np.argsort(-proba)
         best, second = int(order[0]), int(order[1])
         # exact additive decomposition of the winning logit over n-grams:
         #   coef[c,k]*(a_k+b_k) + coef[c,V+k]*a_k*b_k      (+ intercept, not attributed to any feature)
-        contrib = self.coef[best, : self.V] * (a + b) + self.coef[best, self.V:] * (a * b)
+        contrib = self.coef[best, : self.D] * (a + b) + self.coef[best, self.D:] * (a * b)
+        terms = self.terms + self.atc_terms
         feats: List[FeatureContribution] = []
         for k in np.argsort(-contrib)[:top_k]:
             if contrib[k] <= 0:
                 break
             drugs = [n for n, v in ((name_a, a), (name_b, b)) if v[k] > 0]
-            feats.append(FeatureContribution(self.terms[k], float(contrib[k]), drugs))
+            feats.append(FeatureContribution(terms[k], float(contrib[k]), drugs))
         return PairPrediction(
             label=self.classes[best],
             probabilities={c: float(p) for c, p in zip(self.classes, proba)},
