@@ -250,7 +250,7 @@ class TestDatabaseIntegrity(unittest.TestCase):
         al = AuditLedger(
             timestamp="2026-09-25T20:00:00Z",
             actor="system",
-            event_type="LOGIN",
+            event_type="ML_ADVISORY_VIEWED",
             payload={},
             prev_hash="0" * 64,
             hash="c" * 64,

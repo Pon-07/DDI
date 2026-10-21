@@ -47,11 +47,6 @@ def render_markdown(report: Dict[str, Any]) -> str:
                 if key in bk:
                     L.append(f"- {key}: {_fmt(bk[key])}")
             L += [f"- clinical_rows (should be 0 in a knowledge DB): {bk['clinical_rows']}", ""]
-        pr = before.get("production_db", {})
-        if pr.get("present"):
-            L += [f"Production DB sensitive-table rows: {pr['sensitive_table_rows']}; "
-                  f"users with a TOTP secret: {pr.get('users_with_totp_secret', 'n/a')}", ""]
-
     L += ["## After: DDInter", "",
           _table(["metric", "value"], [
               ["raw rows (verbatim, all kept)", dd["raw_rows"]],

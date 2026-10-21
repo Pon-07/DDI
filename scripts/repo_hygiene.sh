@@ -24,18 +24,9 @@ done
 
 cat <<'EOF'
 
-Remaining MANUAL steps (the secrets are still in git history):
+Database files are ignored and must remain local. Rebuild derived datasets without reading legacy database files:
 
- 1. Treat these as compromised and rotate them: the 4 TOTP secrets, active session tokens and
-    OTP records that were committed inside aegis_rx.db-wal (since commit 4362b72).
-      - Re-enrol TOTP for every demo user; set AEGIS_DEMO_MODE=false and change
-        AEGIS_DEMO_DEFAULT_OTP anywhere this app is reachable.
- 2. Purge history, then force-push (coordinate with collaborators first):
-      pip install git-filter-repo
-      git filter-repo --invert-paths \
-        --path aegis_rx.db --path aegis_rx.db-wal --path aegis_rx.db-shm \
-        --path aegis_rx.db.contaminated-backup
-      git remote add origin <url> && git push --force --all
- 3. Commit the .gitignore / requirements / data_pipeline changes.
- 4. Rebuild local data safely:  python scripts/init_db.py && python -m data_pipeline.build
+  python -m data_pipeline.build --no-legacy
+
+This helper does not rewrite Git history or update remote refs.
 EOF

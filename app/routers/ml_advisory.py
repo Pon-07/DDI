@@ -13,8 +13,6 @@ from sqlalchemy.orm import Session
 from agents.audit.ledger import AuditLedger
 from app.dependencies import get_audit_ledger
 from database.database import get_db
-from engine.auth.dependencies import get_current_user
-from engine.auth.models import User
 from ml.advisory import DISCLAIMER, LIMITATIONS, MLSeverityAdvisory, SeverityAdvisor, get_advisor
 from models import Finding, Patient
 
@@ -80,8 +78,8 @@ def ml_status() -> Dict[str, Any]:
 
 
 @router.post("/severity-advisory", response_model=PairAdvisoryResponse,
-             summary="Advisory severity estimate for a drug pair (login required)")
-def pair_advisory(payload: PairAdvisoryRequest, _user: User = Depends(get_current_user)):
+             summary="Advisory severity estimate for a drug pair")
+def pair_advisory(payload: PairAdvisoryRequest):
     adv = _advisor().advise_pair(payload.drug_a, payload.drug_b)
     if adv is None:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -93,11 +91,10 @@ def pair_advisory(payload: PairAdvisoryRequest, _user: User = Depends(get_curren
 
 
 @router.get("/patients/{patient_id}/severity-advisories", response_model=PatientAdvisoryResponse,
-            summary="Advisories next to the patient's stored rule findings (login required)")
+            summary="Advisories next to the patient's stored rule findings")
 def patient_advisories(
     patient_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
     ledger: AuditLedger = Depends(get_audit_ledger),
 ):
     advisor = _advisor()
@@ -107,7 +104,7 @@ def patient_advisories(
     items = advisor.advise_findings(findings)
     try:
         ledger.append_event(
-            actor=user.full_name or "unknown",
+            actor="system",
             event_type="ML_SEVERITY_ADVISORY_VIEWED",
             payload={"patient_id": patient_id, "finding_ids": [i["finding_id"] for i in items],
                      "model": advisor.model.meta["model_name"], "advisory_only": True},

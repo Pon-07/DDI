@@ -23,8 +23,8 @@ env/
 data/raw/*
 data/processed/*
 
-# Databases: never commit live/backup/staging SQLite files (they can hold users, TOTP secrets,
-# sessions and OTP records). Rebuild with scripts/init_db.py and python -m data_pipeline.build.
+# Databases: keep live, backup, and staging SQLite files out of version control.
+# Rebuild derived datasets with python -m data_pipeline.build --no-legacy.
 *.db
 *.db-wal
 *.db-shm
@@ -43,3 +43,6 @@ data_validation/dailymed/
 Thumbs.db
 # WHO ATC/DDD index: licensed by WHO, do not redistribute the raw file
 data_validation/WHO_ATC-DDD*.csv
+
+# Named live database and sidecar files
+aegis_rx.db*

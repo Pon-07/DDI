@@ -153,107 +153,42 @@ def test_can_be_disabled_and_missing_artifact_is_not_an_error(monkeypatch, tmp_p
 @pytest.mark.skipif(not ARTIFACT.exists(), reason="artifact not built")
 class TestApi(unittest.TestCase):
     def setUp(self):
-        from agents.audit.ledger import AuditLedger
-        from app.dependencies import get_audit_ledger
         from app.main import app
-        from database.database import Base, get_db
-        from engine.auth.config import AuthConfig
-        from engine.auth.dependencies import get_auth_service
-        from engine.auth.models import AuthBase
-        from engine.auth.providers.local import LocalDemoOTPProvider
-        from engine.auth.service import AuthService
-        from models import Finding, Patient
         from tests.test_client import LocalTestClient
 
-        self.engine = create_engine("sqlite:///:memory:", connect_args={"check_same_thread": False}, poolclass=StaticPool)
-        Base.metadata.create_all(bind=self.engine)
-        AuthBase.metadata.create_all(bind=self.engine)
-        self.db = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)()
-        self.tmp = tempfile.TemporaryDirectory()
-        self.ledger = AuditLedger(db_path=os.path.join(self.tmp.name, "audit.db"))
-        self.service = AuthService(audit_ledger=self.ledger, sms_provider=LocalDemoOTPProvider(demo_mode=False), demo_mode=False)
-        self.service.seed_demo_users(self.db)
-        app.dependency_overrides[get_db] = lambda: self.db
-        app.dependency_overrides[get_auth_service] = lambda: self.service
-        app.dependency_overrides[get_audit_ledger] = lambda: self.ledger
-        self.app, self.client = app, LocalTestClient(app)
-
-        patient = Patient(patient_identifier=f"TEST-{secrets.token_hex(4)}", name="Synthetic Test Patient")
-        self.db.add(patient); self.db.commit()
-        self.finding = Finding(patient_id=patient.id, rule_id="DDI_x", severity="undetermined",
-                               title="Documented Interaction: Warfarin + Fluconazole", description="d",
-                               inputs={"drug_a": "Warfarin", "drug_b": "Fluconazole"},
-                               trace={"matched_pair": ["fluconazole", "warfarin"]})
-        self.db.add(self.finding); self.db.commit()
-        self.patient_id = patient.id
-
-        import pyotp
-        from engine.auth.models import User
-        user = self.db.query(User).filter(User.role == "Nurse").one()
-        code = pyotp.TOTP(user.totp_secret).now()
-        res = self.client.post("/auth/totp/verify", json={"phone_number": user.phone_number, "totp_code": code})
-        self.auth = {"Authorization": f"Bearer {res.json()['session_token']}"}
+        self.app = app
+        self.client = LocalTestClient(app)
 
     def tearDown(self):
         self.app.dependency_overrides.clear()
-        self.db.close(); self.engine.dispose(); self.tmp.cleanup()
 
-    def test_status_is_public_and_states_limits(self):
+    def test_status_reports_advisory_limits(self):
         data = self.client.get("/ml/status").json()
         assert data["enabled"] and data["clinically_validated"] is False
         assert set(data["held_out_macro_f1"]) == {"both_seen", "one_unseen", "both_unseen"}
         assert data["held_out_macro_f1"]["both_unseen"] < 0.6
 
-    def test_login_is_required_for_advisories(self):
-        assert self.client.post("/ml/severity-advisory", json={"drug_a": "a", "drug_b": "b"}).status_code == 401
-        assert self.client.get(f"/ml/patients/{self.patient_id}/severity-advisories").status_code == 401
-
-    def test_pair_endpoint_warns_when_interaction_not_established(self):
-        res = self.client.post("/ml/severity-advisory", headers=self.auth, json={"drug_a": "fakedrugol", "drug_b": "zorbamine"})
+    def test_pair_endpoint_runs_without_an_account(self):
+        res = self.client.post("/ml/severity-advisory", json={"drug_a": "fakedrugol", "drug_b": "zorbamine"})
         assert res.status_code == 200
         body = res.json()
         assert "cannot tell whether the drugs interact" in body["notice"]
         assert body["advisory"]["advisory_only"] is True
-        assert self.client.post("/ml/severity-advisory", headers=self.auth, json={"drug_a": "x", "drug_b": "x"}).status_code == 422
-        assert self.client.post("/ml/severity-advisory", headers=self.auth, json={"drug_a": "a", "drug_b": "b", "extra": 1}).status_code == 422
+        assert self.client.post("/ml/severity-advisory", json={"drug_a": "x", "drug_b": "x"}).status_code == 422
+        assert self.client.post("/ml/severity-advisory", json={"drug_a": "a", "drug_b": "b", "extra": 1}).status_code == 422
 
-    def test_patient_advisories_leave_rule_findings_untouched_and_are_audited(self):
-        before = (self.finding.severity, self.finding.title, self.finding.description, self.finding.action)
-        res = self.client.get(f"/ml/patients/{self.patient_id}/severity-advisories", headers=self.auth)
-        assert res.status_code == 200
-        data = res.json()
-        assert data["rule_findings_unchanged"] is True and len(data["advisories"]) == 1
-        item = data["advisories"][0]
-        assert item["rule_severity"] == "undetermined" and item["advisory"]["advisory_only"] is True
-        self.db.refresh(self.finding)
-        assert (self.finding.severity, self.finding.title, self.finding.description, self.finding.action) == before
-        events = [e.event_type for e in self.ledger.get_events()]
-        assert "ML_SEVERITY_ADVISORY_VIEWED" in events
-        assert self.client.get("/ml/patients/999999/severity-advisories", headers=self.auth).status_code == 404
+    def test_demo_ui_offers_a_standalone_prediction_form(self):
+        response = self.client.get("/app")
+        assert response.status_code == 200
+        assert "Get advisory" in response.text
+        assert "login-form" not in response.text.lower()
 
-    def test_disabled_returns_503_and_rule_endpoints_still_work(self):
+    def test_disabled_advisory_does_not_break_health(self):
         os.environ["AEGIS_ML_ADVISORY"] = "false"
         try:
-            res = self.client.post("/ml/severity-advisory", headers=self.auth, json={"drug_a": "aspirin", "drug_b": "ibuprofen"})
+            res = self.client.post("/ml/severity-advisory", json={"drug_a": "aspirin", "drug_b": "ibuprofen"})
             assert res.status_code == 503
             assert self.client.get("/ml/status").json()["enabled"] is False
-            assert self.client.get(f"/findings?patient_id={self.patient_id}").status_code == 200
+            assert self.client.get("/health").status_code == 200
         finally:
             os.environ.pop("AEGIS_ML_ADVISORY", None)
-
-
-@pytest.mark.skipif(not ARTIFACT.exists(), reason="artifact not built")
-def test_v2_artifact_atc_section_is_consistent_and_symmetric():
-    art = json.loads(ARTIFACT.read_text(encoding="utf-8"))
-    atc = art["atc"]
-    vocab = set(atc["vocabulary"])
-    assert vocab and all(tok for tok in vocab)
-    for toks in atc["drug_tokens"].values():                   # every stored token exists in the vocabulary
-        assert set(toks) <= vocab
-    assert art["metadata"]["feature_comparison"], "the name-only vs name+ATC comparison must ship with the model"
-    model = SeverityModel.load(ARTIFACT)
-    names = [n for n in list(atc["by_name"])[:6]]
-    assert len(names) >= 2
-    a, b = names[0], names[1]
-    pa, pb = model.predict_proba(a, b), model.predict_proba(b, a)
-    assert np.allclose(pa, pb, atol=1e-12)

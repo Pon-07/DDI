@@ -9,10 +9,6 @@ from agents.audit.ledger import AuditLedger
 from app.dependencies import get_audit_ledger
 from app.main import app
 from database.database import Base, get_db
-from engine.auth.dependencies import get_auth_service
-from engine.auth.models import AuthBase
-from engine.auth.providers.local import LocalDemoOTPProvider
-from engine.auth.service import AuthService
 from engine.drug_service import (
     get_medication_details,
     is_medication_recognized,
@@ -37,7 +33,6 @@ class TestDrugValidationAndLookup(unittest.TestCase):
             poolclass=StaticPool,
         )
         Base.metadata.create_all(bind=self.engine)
-        AuthBase.metadata.create_all(bind=self.engine)
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
         self.db = self.SessionLocal()
 
@@ -45,17 +40,8 @@ class TestDrugValidationAndLookup(unittest.TestCase):
         self.audit_db_path = os.path.join(self.temp_dir.name, "test_drug_audit.db")
         self.audit_ledger = AuditLedger(db_path=self.audit_db_path)
 
-        self.local_provider = LocalDemoOTPProvider(demo_mode=True)
-        self.auth_service = AuthService(
-            audit_ledger=self.audit_ledger,
-            sms_provider=self.local_provider,
-            demo_mode=True,
-        )
-        self.auth_service.seed_demo_users(self.db)
-
         app.dependency_overrides[get_db] = lambda: self.db
         app.dependency_overrides[get_audit_ledger] = lambda: self.audit_ledger
-        app.dependency_overrides[get_auth_service] = lambda: self.auth_service
         self.client = LocalTestClient(app)
 
         # Seed test patient with correct schema attributes

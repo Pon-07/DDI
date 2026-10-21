@@ -32,8 +32,15 @@ def test_requirements_are_plain_utf8(name):
 
 def test_requirements_declare_every_third_party_runtime_import():
     reqs = (REPO_ROOT / "requirements.txt").read_text().lower()
-    for pkg in ("pyotp", "qrcode", "pillow", "fastapi", "sqlalchemy", "pandas", "pydantic"):
+    for pkg in ("fastapi", "sqlalchemy", "pandas", "pydantic"):
         assert re.search(rf"^{pkg}==", reqs, re.M), f"{pkg} not pinned in requirements.txt"
+
+
+def test_authentication_dependencies_are_absent():
+    reqs = (REPO_ROOT / "requirements.txt").read_text().lower()
+    for pkg in ("pyotp", "qrcode", "pillow"):
+        assert not re.search(rf"^{pkg}==", reqs, re.M), f"authentication-only dependency remains: {pkg}"
+    assert not list((REPO_ROOT / "engine" / "auth").rglob("*.py")) if (REPO_ROOT / "engine" / "auth").exists() else True
 
 
 def test_requirements_pins_are_exact():
@@ -95,8 +102,6 @@ def test_tracked_sqlite_files_hold_no_credentials(tmp_path):
         conn = sqlite3.connect(copy)
         try:
             tabs = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-            for t in ("users", "user_sessions", "otp_records"):
-                if t in tabs:
-                    assert conn.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0] == 0, f"{p.name}.{t} has rows"
+            assert not {"users", "user_sessions", "otp_records"} & tabs
         finally:
             conn.close()

@@ -7,12 +7,9 @@ h11==0.16.0
 idna==3.20
 numpy==2.5.3
 pandas==3.0.6
-pillow==13.0.0
 pydantic==2.13.5
 pydantic_core==2.46.5
-pyotp==2.10.0
 python-dateutil==2.9.0.post0
-qrcode==8.2
 six==1.17.0
 SQLAlchemy==2.1.0
 starlette==1.7.0

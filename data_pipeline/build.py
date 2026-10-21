@@ -60,7 +60,6 @@ def _counts(conn: sqlite3.Connection, tables: List[str]) -> Dict[str, Optional[i
 
 KNOWLEDGE_TABLES = ["drugs", "interaction_evidence", "label_evidence", "safety_rules", "rule_versions"]
 CLINICAL_TABLES = ["patients", "medications", "labs", "orders", "events", "findings", "audit_ledger"]
-SENSITIVE_TABLES = ["users", "user_sessions", "otp_records"]
 
 
 def audit_legacy_databases(repo_root: Path, csv_pairs: Optional[set]) -> Dict[str, Any]:
@@ -76,12 +75,6 @@ def audit_legacy_databases(repo_root: Path, csv_pairs: Optional[set]) -> Dict[st
             info["integrity_check"] = conn.execute("PRAGMA integrity_check").fetchone()[0]
             info["knowledge_rows"] = _counts(conn, KNOWLEDGE_TABLES)
             info["clinical_rows"] = _counts(conn, CLINICAL_TABLES)
-            sens = _counts(conn, SENSITIVE_TABLES)
-            info["sensitive_table_rows"] = sens
-            cols = {r[1] for r in conn.execute("PRAGMA table_info(users)")} if sens["users"] is not None else set()
-            if "totp_secret" in cols:
-                info["users_with_totp_secret"] = conn.execute(
-                    "SELECT COUNT(*) FROM users WHERE totp_secret IS NOT NULL AND totp_secret <> ''").fetchone()[0]
             if info["knowledge_rows"]["interaction_evidence"]:
                 rows = conn.execute("SELECT drug_a, drug_b, severity, description FROM interaction_evidence").fetchall()
                 info["interaction_description_equals_severity"] = sum(1 for r in rows if r[3] == r[2])
