@@ -43,6 +43,67 @@ python -m ml.train_final --features auto
 
 The training script writes the artifact and validation reports. Do not retrain merely to run inference or the API.
 
+## Audited Step 5 delivery scope
+
+The reviewed bundle target is `354ccec49507f8dbbce3624483eb18f57becd842`, descended from prerequisite `23d384216ac2c06d8f2fed5867fd4987487172b3`. Its complete base-relative change list has 40 paths (the target commit itself changes 33). The original `changed.txt` / `files/` overlay covers 22 paths and omits the following 11 data files from its list; they are present in the target and included here:
+
+- `data_validation/ddinter_downloads_code_B.csv`
+- `data_validation/ddinter_downloads_code_D.csv`
+- `data_validation/ddinter_downloads_code_H.csv`
+- `data_validation/ddinter_downloads_code_L.csv`
+- `data_validation/ddinter_downloads_code_P.csv`
+- `data_validation/ddinter_downloads_code_R.csv`
+- `data_validation/ddinter_downloads_code_V.csv`
+- `datasets/clean/ddinter_drugs_clean.csv`
+- `datasets/clean/ddinter_pairs_clean.csv`
+- `datasets/clean/feature_coverage.csv`
+- `datasets/clean/quality_issues.csv`
+
+The seven category files complete DDInter categories B, D, H, L, P, R, V; category A was already present at the prerequisite. The four clean CSVs are updated outputs. The complete 40-path list follows:
+
+- `.gitignore`
+- `README.md`
+- `ROTATE.md`
+- `app/routers/demo.py`
+- `data_pipeline/atc.py`
+- `data_pipeline/build.py`
+- `data_pipeline/features.py`
+- `data_pipeline/staging.py`
+- `data_validation/ddinter_downloads_code_B.csv`
+- `data_validation/ddinter_downloads_code_D.csv`
+- `data_validation/ddinter_downloads_code_H.csv`
+- `data_validation/ddinter_downloads_code_L.csv`
+- `data_validation/ddinter_downloads_code_P.csv`
+- `data_validation/ddinter_downloads_code_R.csv`
+- `data_validation/ddinter_downloads_code_V.csv`
+- `datasets/clean/ddinter_drugs_clean.csv`
+- `datasets/clean/ddinter_pairs_clean.csv`
+- `datasets/clean/feature_coverage.csv`
+- `datasets/clean/quality_issues.csv`
+- `ml/advisory.py`
+- `ml/artifacts/severity_baseline_v2.json`
+- `ml/data.py`
+- `ml/inference.py`
+- `ml/reports/severity_model_validation.json`
+- `ml/reports/severity_model_validation.md`
+- `ml/train_final.py`
+- `reports/data_quality/data_quality_report.json`
+- `reports/data_quality/data_quality_report.md`
+- `scripts/add_ddinter_files.py`
+- `scripts/rotate_auth_credentials.py`
+- `tests/data_quality/test_add_ddinter_files.py`
+- `tests/data_quality/test_atc.py`
+- `tests/data_quality/test_staging_build.py`
+- `tests/ml/test_severity_advisory.py`
+- `tests/test_auth_flow.py`
+- `tests/test_multiuser_auth_isolation.py`
+- `tests/test_rotate_auth_credentials.py`
+- `tests/test_sms_providers.py`
+- `tests/test_step47_demo_runtime.py`
+- `tests/test_totp_auth.py`
+
+The delivered ML-only source tree is a follow-up to that audited target. The exact Step 5 and final validation state is summarized in the ZIP delivery manifest.
+
 ## Model results
 
 The checked-in v2 report gives five-seed held-out macro-F1 results:
