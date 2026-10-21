@@ -1,17 +1,10 @@
 # Data quality report
 
-Pipeline v1.0.0 - generated 2026-10-20T20:19:51Z
+Pipeline v1.0.0 - generated 2026-10-21T11:30:15Z
 
 ## Production safety
 
 Production DB files unchanged by the build: **True** (SHA-256 before/after).
-
-## Before (databases as shipped)
-
-| database | integrity | drugs | interaction_evidence | label_evidence | safety_rules |
-|---|---|---|---|---|---|
-| production_db | absent |  |  |  |  |
-| legacy_backup | absent |  |  |  |  |
 
 ## After: DDInter
 
@@ -51,7 +44,7 @@ DailyMed labels ingested: **0** (missing). DDInter-to-openFDA exact-name links: 
 
 | table | rows |
 |---|---|
-| source_files | 27 |
+| source_files | 29 |
 | ddinter_raw | 222,383 |
 | ddinter_drugs | 1,939 |
 | ddinter_pairs | 160,235 |
@@ -62,7 +55,8 @@ DailyMed labels ingested: **0** (missing). DDInter-to-openFDA exact-name links: 
 | dailymed_sections | 0 |
 | drug_xref | 2,537 |
 | atc_codes | 7,536 |
-| drug_atc | 2,341 |
+| drug_atc | 2,434 |
+| drug_rxcui | 1,744 |
 | quality_issues | 9 |
 | feature_coverage | 13 |
 
@@ -74,8 +68,8 @@ DailyMed labels ingested: **0** (missing). DDInter-to-openFDA exact-name links: 
 | negative_pairs (non-interacting drug pairs) | missing | 0 | 160,235 | Without negatives only severity classification among known interactions is valid, not interaction/no-interacti |
 | ddinter_category_files | available | 8 | 8 | Present: A,B,D,H,L,P,R,V. Missing files cannot be downloaded here. Build environment has no access to this sou |
 | interaction_text_or_mechanism | missing | 0 | 160,235 | CSV has no text; legacy JSON 'description' is a copy of the severity word |
-| rxcui (RxNorm) | blocked | 0 | 1,939 | No RxNorm file in repo; raw openFDA JSON is a Git-LFS pointer. Build environment has no access to this source  |
-| atc_codes | partial | 1,619 | 1,939 | Exact normalised-name match to 7-character ATC substance names only (no fuzzy matching); unmatched drugs stay  |
+| rxcui (RxNorm) | partial | 1,744 | 1,939 | Exact normalised-name match to RxNorm ingredient concepts (IN/PIN); ambiguous names skipped; ClinPGx fills a f |
+| atc_codes | partial | 1,684 | 1,939 | Exact normalised-name match to 7-character ATC substance names (WHO file), then ClinPGx ATC ids for the rest;  |
 | cyp450_profile (substrate/inhibitor/inducer) | blocked | 0 | 1,939 | Not in repo. Build environment has no access to this source (only repo files + PyPI reachable). |
 | drugbank_id | blocked | 0 | 1,939 | Not in repo. Build environment has no access to this source (only repo files + PyPI reachable). |
 | openfda_labels_with_drug_name | partial | 4,049 | 20,000 | Raw file is a Git-LFS pointer (632 MB not in repo). Names are not inferred from prose. |

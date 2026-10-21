@@ -125,8 +125,15 @@ CREATE INDEX idx_atc_codes_code ON atc_codes(atc_code);
 CREATE TABLE drug_atc (
     ddinter_id TEXT NOT NULL REFERENCES ddinter_drugs(ddinter_id),
     atc_code TEXT NOT NULL,
-    match_type TEXT NOT NULL CHECK (match_type = 'exact_normalized_name'),
+    match_type TEXT NOT NULL CHECK (match_type IN ('exact_normalized_name','clinpgx_exact_name')),
     PRIMARY KEY (ddinter_id, atc_code)
+);
+CREATE TABLE drug_rxcui (
+    ddinter_id TEXT NOT NULL REFERENCES ddinter_drugs(ddinter_id),
+    rxcui TEXT NOT NULL,
+    tty TEXT,                       -- RxNorm term type (IN / PIN) when the source is RxNorm
+    source TEXT NOT NULL CHECK (source IN ('rxnorm_exact_name','clinpgx_exact_name')),
+    PRIMARY KEY (ddinter_id, rxcui)
 );
 CREATE TABLE drug_xref (
     ddinter_id TEXT NOT NULL REFERENCES ddinter_drugs(ddinter_id),

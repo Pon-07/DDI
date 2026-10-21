@@ -200,13 +200,22 @@ def test_missing_sources_are_recorded_not_hidden(staging):
 
 
 def test_feature_slots_are_empty_never_fabricated(staging):
-    for col in ("rxcui", "cyp_profile", "drugbank_id"):
+    for col in ("cyp_profile", "drugbank_id"):
         assert staging.execute(f"SELECT COUNT({col}) FROM ddinter_drugs").fetchone()[0] == 0
+    # RxCUI only from RxNorm / ClinPGx files in data_validation/external/, by exact name, one source row per value
+    n_rx = staging.execute("SELECT COUNT(rxcui) FROM ddinter_drugs").fetchone()[0]
+    if (DATA_DIR / "external").exists() and any((DATA_DIR / "external").glob("RxNorm*.zip")):
+        total = staging.execute("SELECT COUNT(*) FROM ddinter_drugs").fetchone()[0]
+        assert 0 < n_rx < total
+        assert staging.execute("SELECT COUNT(*) FROM (SELECT ddinter_id FROM drug_rxcui GROUP BY 1 HAVING COUNT(*)>1)").fetchone()[0] == 0
+    else:
+        assert n_rx == 0
     # ATC is filled only from a WHO file in data_validation/, by exact normalised name, and only when that file exists
     n_atc = staging.execute("SELECT COUNT(atc_codes) FROM ddinter_drugs").fetchone()[0]
     if list(DATA_DIR.glob("WHO_ATC-DDD*.csv")):
         assert 0 < n_atc < staging.execute("SELECT COUNT(*) FROM ddinter_drugs").fetchone()[0]
-        assert staging.execute("SELECT COUNT(*) FROM drug_atc WHERE match_type!='exact_normalized_name'").fetchone()[0] == 0
+        assert staging.execute("SELECT COUNT(*) FROM drug_atc WHERE match_type NOT IN "
+                               "('exact_normalized_name','clinpgx_exact_name')").fetchone()[0] == 0
     else:
         assert n_atc == 0
     assert staging.execute("SELECT COUNT(rxcui) FROM openfda_labels").fetchone()[0] == 0
@@ -214,8 +223,9 @@ def test_feature_slots_are_empty_never_fabricated(staging):
 
 def test_feature_coverage_reports_missing_ml_features(staging):
     st = {r["feature"]: r["status"] for r in staging.execute("SELECT feature, status FROM feature_coverage")}
-    for f in ("rxcui (RxNorm)", "cyp450_profile (substrate/inhibitor/inducer)", "negative_pairs (non-interacting drug pairs)"):
+    for f in ("cyp450_profile (substrate/inhibitor/inducer)", "negative_pairs (non-interacting drug pairs)"):
         assert st[f] in ("missing", "blocked")
+    assert st["rxcui (RxNorm)"] in ("partial", "missing", "blocked")
     has_who = bool(list(DATA_DIR.glob("WHO_ATC-DDD*.csv")))
     assert st["atc_codes"] == ("partial" if has_who else st["atc_codes"])
     assert st["atc_codes"] in ("partial", "missing", "blocked")

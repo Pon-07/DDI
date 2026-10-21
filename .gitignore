@@ -46,3 +46,4 @@ data_validation/WHO_ATC-DDD*.csv
 
 # Named live database and sidecar files
 aegis_rx.db*
+data_validation/external/

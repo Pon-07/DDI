@@ -96,13 +96,14 @@
       "ddinter_pair_rows": 222383,
       "ddinter_pairs": 160235,
       "ddinter_raw": 222383,
-      "drug_atc": 2341,
+      "drug_atc": 2434,
+      "drug_rxcui": 1744,
       "drug_xref": 2537,
       "feature_coverage": 13,
       "openfda_labels": 20000,
       "openfda_sections": 37197,
       "quality_issues": 9,
-      "source_files": 27
+      "source_files": 29
     }
   },
   "atc": {
@@ -111,13 +112,16 @@
     "drugs": 1939,
     "drugs_matched": 1619
   },
-  "before": {
-    "legacy_backup": {
-      "present": false
-    },
-    "production_db": {
-      "present": false
-    }
+  "before": {},
+  "crosswalk": {
+    "clinpgx_atc_added": 65,
+    "clinpgx_name_ambiguous_skipped": 11,
+    "clinpgx_rxcui_added": 228,
+    "clinpgx_single_drug_names": 9601,
+    "drugs": 1939,
+    "rxcui_ambiguous_skipped": 16,
+    "rxcui_matched": 1516,
+    "rxnorm_names_indexed": 6865
   },
   "feature_coverage": [
     {
@@ -157,17 +161,17 @@
       "total_rows": 160235
     },
     {
-      "available_rows": 0,
-      "blocker": "No RxNorm file in repo; raw openFDA JSON is a Git-LFS pointer. Build environment has no access to this source (only repo files + PyPI reachable).",
+      "available_rows": 1744,
+      "blocker": "Exact normalised-name match to RxNorm ingredient concepts (IN/PIN); ambiguous names skipped; ClinPGx fills a few more. Unmatched drugs stay NULL. Identifier only: it is not used as a model feature yet.",
       "category": "identifiers",
       "feature": "rxcui (RxNorm)",
-      "source_needed": "RxNorm RRF (free UMLS licence) or openFDA raw `openfda.rxcui`",
-      "status": "blocked",
+      "source_needed": "RxNorm RRF (free UMLS licence), placed in data_validation/external/ (git-ignored)",
+      "status": "partial",
       "total_rows": 1939
     },
     {
-      "available_rows": 1619,
-      "blocker": "Exact normalised-name match to 7-character ATC substance names only (no fuzzy matching); unmatched drugs stay NULL. DDInter file letters (A,B,D...) are not per-drug ATC codes. WHO licence applies to the raw file.",
+      "available_rows": 1684,
+      "blocker": "Exact normalised-name match to 7-character ATC substance names (WHO file), then ClinPGx ATC ids for the rest; no fuzzy matching; unmatched drugs stay NULL. DDInter file letters (A,B,D...) are not per-drug ATC codes. WHO licence applies to the raw file.",
       "category": "features",
       "feature": "atc_codes",
       "source_needed": "WHO ATC/DDD index (data_validation/WHO_ATC-DDD*.csv)",
@@ -238,7 +242,7 @@
       "total_rows": 0
     }
   ],
-  "generated_at_utc": "2026-10-20T20:19:51Z",
+  "generated_at_utc": "2026-10-21T11:30:15Z",
   "inputs": [
     {
       "path": "data_validation/ddinter_downloads_code_A.csv",
@@ -376,7 +380,6 @@
     "missing_or_blocked_features": [
       "negative_pairs (non-interacting drug pairs)",
       "interaction_text_or_mechanism",
-      "rxcui (RxNorm)",
       "cyp450_profile (substrate/inhibitor/inducer)",
       "drugbank_id",
       "dailymed_labels",

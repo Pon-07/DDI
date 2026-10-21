@@ -106,15 +106,31 @@ The delivered ML-only source tree is a follow-up to that audited target. The exa
 
 ## Model results
 
-The checked-in v2 report gives five-seed held-out macro-F1 results:
+The checked-in v2.1 report gives five-seed held-out macro-F1 results (ingredient-grouped splits, see below):
 
 | Evaluation regime | Macro-F1 (mean ± std) |
 | --- | ---: |
 | Both drugs seen in training | 0.684 ± 0.009 |
-| One drug unseen | 0.589 ± 0.011 |
-| Both drugs unseen | 0.485 ± 0.024 |
+| One drug unseen | 0.585 ± 0.008 |
+| Both drugs unseen (cold start) | 0.488 ± 0.019 |
 
-These are model-report metrics, not a clinical performance claim. The evaluation splits by drug identity; the both-seen score may reflect drug-identity signal. The shipped final weights are trained on all labeled pairs and do not have an independent holdout set of their own.
+Name-only features score 0.676 / 0.559 / 0.446 on the same splits, so WHO ATC helps mainly for unseen drugs. Cold-start recall of `Major` is still only 0.48.
+
+Splits hold out whole **ingredients** (same RxCUI, else same normalised name) and whole ingredient pairs, because DDInter lists 107 ingredient names under 243 ids (route/form variants) that the model sees as identical. With 5 seeds this changed the scores by less than their standard deviation (per-id splits: 0.687 / 0.590 / 0.487), so the earlier numbers were not materially inflated; the stricter split is kept anyway and is covered by `tests/ml/test_grouped_split.py`.
+
+These are model-report metrics, not a clinical performance claim. The both-seen score may reflect drug-identity signal. The shipped final weights are trained on all labeled pairs and do not have an independent holdout set of their own.
+
+## Identifier cross-references (RxNorm, ClinPGx)
+
+`data_pipeline/crosswalk.py` links DDInter drugs to identifiers by **exact normalised name only** (no fuzzy matching). Place the source files in `data_validation/external/` (git-ignored, not committed): the RxNorm Current Prescribable Content zip and ClinPGx `drugs.zip` (both available in the Kawinkrish/data repository). Then run `python -m data_pipeline.build --no-legacy`.
+
+| field | coverage | rule |
+|---|---|---|
+| RxCUI | 1,744 / 1,939 (RxNorm 1,516 + ClinPGx 228) | RxNorm ingredient concepts (IN, PIN) only; a name with more than one RxCUI is skipped (16 drugs), never guessed |
+| ATC | 1,684 / 1,939 (WHO 1,619 + ClinPGx 65) | ClinPGx fills only drugs the WHO file did not match, 7-character codes, unique drug record |
+| CYP450 role | 0 | **not available**: ClinPGx CYP rows are pharmacogenomic gene-chemical associations, not substrate/inhibitor/inducer roles, so they are deliberately not used |
+
+The provenance of every value is in the staging tables `drug_rxcui` and `drug_atc`. RxCUI is an identifier only; the model does not use it as a feature (it is used to group synonyms in the evaluation splits). Without the external files the build still runs and those columns stay empty. Licences: DDInter, ClinPGx and the community ATC snapshot are CC BY-NC-SA 4.0 (non-commercial, share-alike); RxNorm and WHO ATC carry their own terms.
 
 ## Limitations and licensing
 
@@ -124,9 +140,8 @@ WHO ATC/DDD source data are not included. The repository ignores the raw WHO ind
 
 ## Validation
 
-- Focused ML, ATC, data-quality, and drug-validation suite: **85 passed, 1 skipped**.
-- Full test suite: **439 passed, 1 skipped** (1,643 warnings, chiefly existing deprecation warnings).
+- Full test suite: **445 passed, 0 failed** (with the WHO and external files present; the data-quality tests also pass without them).
 - The test run used the repository's disposable-database isolation fixture; the protected real database files were not modified.
-- No model training was run. Metrics above come from the checked-in validation report.
+- The v2.1 artifact was retrained for this change (5 seeds); metrics above come from `ml/reports/severity_model_validation.md`.
 
 Tests use synthetic fixtures and disposable databases; they must not use `aegis_rx.db*`.

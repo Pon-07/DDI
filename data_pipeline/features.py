@@ -55,11 +55,12 @@ def compute_feature_coverage(
         "DDInter interaction descriptions (web/API) or DrugBank interaction text",
         "CSV has no text; legacy JSON 'description' is a copy of the severity word", status="missing")
     add("rxcui (RxNorm)", "identifiers", _scalar(conn, "SELECT COUNT(rxcui) FROM ddinter_drugs"), drugs,
-        "RxNorm RRF (free UMLS licence) or openFDA raw `openfda.rxcui`",
-        "No RxNorm file in repo; raw openFDA JSON is a Git-LFS pointer. " + NETWORK_BLOCK, blocked=True)
+        "RxNorm RRF (free UMLS licence), placed in data_validation/external/ (git-ignored)",
+        "Exact normalised-name match to RxNorm ingredient concepts (IN/PIN); ambiguous names skipped; ClinPGx fills a few more. "
+        "Unmatched drugs stay NULL. Identifier only: it is not used as a model feature yet.", blocked=True)
     add("atc_codes", "features", _scalar(conn, "SELECT COUNT(atc_codes) FROM ddinter_drugs"), drugs,
         "WHO ATC/DDD index (data_validation/WHO_ATC-DDD*.csv)",
-        "Exact normalised-name match to 7-character ATC substance names only (no fuzzy matching); unmatched drugs "
+        "Exact normalised-name match to 7-character ATC substance names (WHO file), then ClinPGx ATC ids for the rest; no fuzzy matching; unmatched drugs "
         "stay NULL. DDInter file letters (A,B,D...) are not per-drug ATC codes. WHO licence applies to the raw file.",
         blocked=True)
     add("cyp450_profile (substrate/inhibitor/inducer)", "features",

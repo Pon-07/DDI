@@ -44,6 +44,9 @@ def build_drug_table(clean_dir: Path) -> pd.DataFrame:
     out["atc_tokens"] = out["atc_codes"].fillna("").map(atc_tokens)
     # the text used for char n-grams: normalised ingredient name (no label text, so no leakage of outcomes)
     out["name_text"] = out["ingredient_normalized"].where(out["ingredient_normalized"] != "", out["name_normalized"])
+    # identity the MODEL sees; used to keep variants of one drug (route/form ids, RxNorm synonyms) on the same side of a split
+    rx = out["rxcui"].fillna("") if "rxcui" in out.columns else ""
+    out["group_key"] = [("rx:" + r) if r else "n:" + n for r, n in zip(rx if len(rx) else [""] * len(out), out["name_text"])]
     return out.set_index("ddinter_id")
 
 

@@ -38,7 +38,7 @@ MAX_FEATURES = 4000
 C = 1.0
 BANDS = [(0.0, 0.5, "low"), (0.5, 0.7, "medium"), (0.7, 1.01, "high")]
 REGIMES = ("both_seen", "one_unseen", "both_unseen")
-MODEL_VERSION = "severity-baseline-v2"
+MODEL_VERSION = "severity-baseline-v2.1"
 
 
 def _sha256(path: Path) -> str:
@@ -91,24 +91,41 @@ def _X(pairs: pd.DataFrame, drugs: pd.DataFrame, fs: "FeatureSpace") -> sp.csr_m
     return fs.X(pairs, drugs)
 
 
-def regime_split(pairs: pd.DataFrame, seed: int, drug_frac: float = 0.2, pair_frac: float = 0.2):
+def regime_split(pairs: pd.DataFrame, seed: int, drug_frac: float = 0.2, pair_frac: float = 0.2, groups=None):
     """Train on pairs among 'seen' drugs minus a random pair hold-out. Test on three disjoint sets:
     both_seen   - held-out pairs whose two drugs both appear in training (new pair, known drugs)
     one_unseen  - pairs with exactly one held-out drug
-    both_unseen - pairs with both drugs held out (cold start)"""
+    both_unseen - pairs with both drugs held out (cold start)
+
+    groups: optional mapping DDInter id -> group key (the ingredient the model actually sees). DDInter lists the same
+    ingredient under several ids (route/form variants). Holding out ids only would leave a sibling of an 'unseen' drug in
+    training with IDENTICAL features, so with groups whole ingredients are held out together, and the both_seen hold-out is
+    drawn per ingredient pair so a variant pair cannot sit in both train and test."""
     rng = np.random.default_rng(seed)
-    drugs = np.array(sorted(set(pairs["id_lo"]) | set(pairs["id_hi"])))
-    held = set(rng.choice(drugs, size=int(len(drugs) * drug_frac), replace=False))
+    key = (lambda i: i) if groups is None else (lambda i: groups.get(i, i) or i)
+    ids = np.array(sorted(set(pairs["id_lo"]) | set(pairs["id_hi"])))
+    gkeys = np.array(sorted({key(i) for i in ids}))
+    held_groups = set(rng.choice(gkeys, size=int(len(gkeys) * drug_frac), replace=False))
+    held = {i for i in ids if key(i) in held_groups}
     lo, hi = pairs["id_lo"].isin(held).to_numpy(), pairs["id_hi"].isin(held).to_numpy()
     seen_pairs = np.where(~lo & ~hi)[0]
-    perm = rng.permutation(seen_pairs)
-    n_t = int(len(perm) * pair_frac)
-    test_seen, train = perm[:n_t], perm[n_t:]
+    pk = np.array([f"{min(key(a), key(b))}||{max(key(a), key(b))}" for a, b in
+                   zip(pairs.iloc[seen_pairs]["id_lo"], pairs.iloc[seen_pairs]["id_hi"])])
+    uniq = np.array(sorted(set(pk)))
+    test_keys = set(rng.choice(uniq, size=int(len(uniq) * pair_frac), replace=False))
+    in_test = np.array([k in test_keys for k in pk])
+    test_seen, train = seen_pairs[in_test], seen_pairs[~in_test]
     tests = {"both_seen": test_seen, "one_unseen": np.where(lo ^ hi)[0], "both_unseen": np.where(lo & hi)[0]}
     # drugs of a test set that are claimed 'unseen' must not occur in training
     train_ids = set(pairs.iloc[train]["id_lo"]) | set(pairs.iloc[train]["id_hi"])
     assert not (held & train_ids)
     assert_drug_disjoint(pairs, train, tests["both_unseen"])
+    if groups is not None:
+        train_groups = {key(i) for i in train_ids}
+        assert not (held_groups & train_groups), "an ingredient is both held out and in training"
+        train_pk = {f"{min(key(a), key(b))}||{max(key(a), key(b))}" for a, b in
+                    zip(pairs.iloc[train]["id_lo"], pairs.iloc[train]["id_hi"])}
+        assert not (test_keys & train_pk), "an ingredient pair is in both train and test"
     return train, tests
 
 
@@ -121,11 +138,12 @@ def _metrics(y, p) -> Dict:
     }
 
 
-def cross_validate(pairs, drugs, seeds: int, use_atc: bool = False) -> Dict:
+def cross_validate(pairs, drugs, seeds: int, use_atc: bool = False, grouped: bool = True) -> Dict:
+    groups = drugs["group_key"].to_dict() if grouped else None
     per_regime: Dict[str, Dict[str, List]] = {r: {"model": [], "majority": [], "stratified": []} for r in REGIMES}
     pooled = {r: {"y": [], "pred": [], "conf": []} for r in REGIMES}
     for seed in range(seeds):
-        train, tests = regime_split(pairs, seed)
+        train, tests = regime_split(pairs, seed, groups=groups)
         vec, clf = _fit(pairs, drugs, train, seed, use_atc)
         y_tr = pairs.iloc[train]["y"].to_numpy()
         maj = DummyClassifier(strategy="most_frequent").fit(np.zeros((len(train), 1)), y_tr)
@@ -249,7 +267,7 @@ def render_md(art: dict, gap: float) -> str:
     m, v = art["metadata"], art["validation"]["summary"]
     L = [f"# {m['model_name']} - validation report", "",
          f"Trained {m['trained_at_utc']} on **{m['n_training_pairs']:,}** labelled DDInter pairs ({m['n_training_drugs']:,} drugs): {m['class_counts']}.",
-         "", "**Advisory only. Not clinically validated.** Features: " + m["features"] + ". No RxCUI/CYP450/interaction text. "
+         "", "**Advisory only. Not clinically validated.** Features: " + m["features"] + ". No RxCUI/CYP450/interaction-text features (RxCUI is stored as an identifier only). "
          "The model estimates severity for an interaction that already exists; it was trained without negative examples "
          "and cannot tell whether two drugs interact. Chance macro-F1 for 3 classes is ~0.33.", "",
          "## Held-out results (mean ± std over %d seeds)" % m["hyperparameters"]["validation_seeds"], "",
@@ -268,6 +286,15 @@ def render_md(art: dict, gap: float) -> str:
         for name, res in cmp_["results"].items():
             L.append(f"| {name} | " + " | ".join(f"{res[r]['mean']:.3f} ± {res[r]['std']:.3f}" for r in REGIMES) + " |")
         L += ["", f"Decision: **{cmp_['decision']}**", ""]
+        if cmp_.get("split_policy"):
+            L += ["## Split policy (shipped features)", "",
+                  "DDInter lists some ingredients under several ids (route/form variants) and the model sees only the ingredient, so "
+                  "per-id splits leave a sibling of an 'unseen' drug in training. The reported numbers hold out whole ingredients "
+                  "(same RxCUI or same name together) and whole ingredient pairs.", "",
+                  "| split | both_seen | one_unseen | both_unseen (cold start) |", "|---|---|---|---|"]
+            for name, res in cmp_["split_policy"].items():
+                L.append(f"| {name} | " + " | ".join(f"{res[r]['mean']:.3f} ± {res[r]['std']:.3f}" for r in REGIMES) + " |")
+            L.append("")
     L += ["", "## Reliability of a prediction (pooled held-out pairs)", "",
           "Share of held-out pairs that truly had the predicted label, by confidence band, next to how common that label is.", ""]
     for r in REGIMES:
@@ -336,9 +363,13 @@ def main(argv=None) -> int:
         raise SystemExit("no ATC data in datasets/clean/ddinter_drugs_clean.csv")
     decision = ("ship name + ATC" if use_atc else "ship name-only") + f" (--features {a.features})"
     cv = cv_atc if use_atc else cv_name
+    # how much the earlier per-id splits flattered the numbers (same features, same seeds)
+    cv_ids = cross_validate(pairs, drugs, a.seeds, use_atc=use_atc, grouped=False)
+    split_cmp = {"ingredient-grouped splits (this model)": {r: cv["summary"][r]["model"]["macro_f1"] for r in REGIMES},
+                 "per-DDInter-id splits (previous reports)": {r: cv_ids["summary"][r]["model"]["macro_f1"] for r in REGIMES}}
     who_lookup = _who_lookup(a.atc_file or _default_atc_file()) if use_atc else None
     artifact, vec, clf = build_artifact(pairs, drugs, a.clean_dir, a.seeds, cv, use_atc=use_atc, who_lookup=who_lookup,
-                                        comparison={"results": results, "decision": decision})
+                                        comparison={"results": results, "decision": decision, "split_policy": split_cmp})
     gap = verify_equivalence(artifact, pairs, drugs, vec, clf)
     a.artifact.parent.mkdir(parents=True, exist_ok=True)
     a.artifact.write_text(json.dumps(artifact, separators=(",", ":")), encoding="utf-8")

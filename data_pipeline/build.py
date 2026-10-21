@@ -26,7 +26,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from data_pipeline import PIPELINE_VERSION
-from data_pipeline import atc
+from data_pipeline import atc, crosswalk
 from data_pipeline import dailymed as dm
 from data_pipeline import ddinter as ddi
 from data_pipeline import features as feat
@@ -191,6 +191,45 @@ def run_build(
                 d["atc_codes"] = ";".join(matched[d["ddinter_id"]])
         report["atc"] = atc_stats
 
+    # ===== RxNorm + ClinPGx cross-references (optional, not committed: data_validation/external/) =========
+    ext_dir = data_dir / "external"
+    rx_files = sorted(ext_dir.glob("RxNorm*.zip")) + sorted(ext_dir.glob("RXNCONSO.RRF"))
+    cp_files = sorted(ext_dir.glob("drugs.zip")) + sorted(ext_dir.glob("drugs.tsv"))
+    xw_stats: Dict[str, Any] = {}
+    rx_by_id: Dict[str, str] = {}
+    if rx_files:
+        rx_path = rx_files[0]
+        stg.add_source_file(conn, dataset="rxnorm", path=f"{DATA_DIR}/external/{rx_path.name}", sha256=sha256_file(rx_path),
+                            size_bytes=rx_path.stat().st_size, row_count=None, status="ingested")
+        rx_matched, rx_stats = crosswalk.match_rxnorm(dd.drugs, crosswalk.read_rxnorm_ingredients(rx_path))
+        conn.executemany("INSERT INTO drug_rxcui VALUES (?,?,?,'rxnorm_exact_name')",
+                         [(i, rc, tty) for i, (rc, tty) in rx_matched.items()])
+        rx_by_id.update({i: rc for i, (rc, _t) in rx_matched.items()})
+        xw_stats.update(rx_stats)
+    if cp_files:
+        cp_path = cp_files[0]
+        stg.add_source_file(conn, dataset="clinpgx", path=f"{DATA_DIR}/external/{cp_path.name}", sha256=sha256_file(cp_path),
+                            size_bytes=cp_path.stat().st_size, row_count=None, status="ingested")
+        have_atc = {d["ddinter_id"] for d in dd.drugs if d.get("atc_codes")}
+        cp_rx, cp_atc, cp_stats = crosswalk.clinpgx_topup(dd.drugs, crosswalk.read_clinpgx_drugs(cp_path),
+                                                          set(rx_by_id), have_atc)
+        conn.executemany("INSERT INTO drug_rxcui VALUES (?,?,NULL,'clinpgx_exact_name')", list(cp_rx.items()))
+        conn.executemany("INSERT INTO drug_atc VALUES (?,?, 'clinpgx_exact_name')",
+                         [(i, c) for i, codes in cp_atc.items() for c in codes])
+        conn.executemany("UPDATE ddinter_drugs SET atc_codes=? WHERE ddinter_id=?",
+                         [(";".join(codes), i) for i, codes in cp_atc.items()])
+        rx_by_id.update(cp_rx)
+        for d in dd.drugs:
+            if d["ddinter_id"] in cp_atc:
+                d["atc_codes"] = ";".join(cp_atc[d["ddinter_id"]])
+        xw_stats.update(cp_stats)
+    if rx_by_id:
+        conn.executemany("UPDATE ddinter_drugs SET rxcui=? WHERE ddinter_id=?", [(rc, i) for i, rc in rx_by_id.items()])
+        for d in dd.drugs:
+            if d["ddinter_id"] in rx_by_id:
+                d["rxcui"] = rx_by_id[d["ddinter_id"]]
+    report["crosswalk"] = xw_stats
+
     legacy_json = data_dir / "ddinter_normalized.json"
     json_check = None
     if legacy_json.exists():
@@ -330,7 +369,7 @@ def run_build(
         raise RuntimeError("Production database files changed during the staging build! Aborting.")
 
     tables = ["source_files", "ddinter_raw", "ddinter_drugs", "ddinter_pairs", "ddinter_pair_rows",
-              "openfda_labels", "openfda_sections", "dailymed_labels", "dailymed_sections", "drug_xref", "atc_codes", "drug_atc",
+              "openfda_labels", "openfda_sections", "dailymed_labels", "dailymed_sections", "drug_xref", "atc_codes", "drug_atc", "drug_rxcui",
               "quality_issues", "feature_coverage"]
     table_counts = {t: cur.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0] for t in tables}
 
