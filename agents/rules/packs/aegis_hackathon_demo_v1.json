@@ -1,0 +1,49 @@
+{
+  "pack_name": "aegis_hackathon_demo",
+  "version": "1.0.0",
+  "description": "Deterministic qualitative safety rules for the three AEGIS Rx hackathon research-prototype demo cases. Numeric INR, renal, dose, QTc, and monitoring values are omitted because this repository does not contain validated evidence for those parameters.",
+  "rules": [
+    {
+      "rule_id": "AEGIS-DEMO-001-WARFARIN-FLUCONAZOLE",
+      "rule_type": "drug_interaction",
+      "category": "drug_drug_interaction",
+      "drug_a": "warfarin",
+      "drug_b": "fluconazole",
+      "source": "AEGIS_HACKATHON_DEMO",
+      "source_version": "1.0.0",
+      "evidence_id": "AEGIS-DEMO-EV-001",
+      "evidence_text": "AEGIS hackathon demo case: warfarin plus fluconazole with rising INR. No validated INR numeric threshold, warfarin dose adjustment, or INR monitoring interval is present in this repository; those parameters require validated evidence. Deterministic safety action is limited to review/hold/monitor and safer-alternative evaluation. This is not autonomous prescribing.",
+      "severity": "review_required",
+      "action": "review/hold/monitor; evaluate safer alternative",
+      "status": "active"
+    },
+    {
+      "rule_id": "AEGIS-DEMO-002-ENOXAPARIN-RENAL",
+      "rule_type": "renal_risk",
+      "category": "renal_risk",
+      "drug_a": "enoxaparin",
+      "drug_b": null,
+      "source": "AEGIS_HACKATHON_DEMO",
+      "source_version": "1.0.0",
+      "evidence_id": "AEGIS-DEMO-EV-002",
+      "evidence_text": "AEGIS hackathon demo case: enoxaparin with declining renal function. No validated eGFR/CrCl cutoff, dose, or dose-adjustment schedule for enoxaparin is present in this repository; those parameters require validated evidence. Deterministic safety action is limited to review/hold/monitor and dose-adjustment evaluation. This is not autonomous prescribing.",
+      "severity": "review_required",
+      "action": "review/hold/monitor; evaluate dose adjustment",
+      "status": "active"
+    },
+    {
+      "rule_id": "AEGIS-DEMO-003-DUPLICATE-ACE-INHIBITOR",
+      "rule_type": "duplicate_therapy",
+      "category": "duplicate_therapy",
+      "drug_a": "ace inhibitor",
+      "drug_b": "ace inhibitor",
+      "source": "AEGIS_HACKATHON_DEMO",
+      "source_version": "1.0.0",
+      "evidence_id": "AEGIS-DEMO-EV-003",
+      "evidence_text": "AEGIS hackathon demo case: duplicate ACE-inhibitor therapy. No validated ACE-inhibitor pair list, dose, or combination threshold is present in this repository; those parameters require validated evidence. Deterministic safety action is duplicate therapy review. This is not autonomous prescribing.",
+      "severity": "review_required",
+      "action": "duplicate therapy review",
+      "status": "active"
+    }
+  ]
+}

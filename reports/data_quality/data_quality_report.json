@@ -1,0 +1,377 @@
+{
+  "after": {
+    "clean_csv_exports": {
+      "ddinter_drugs_clean.csv": 1939,
+      "ddinter_pairs_clean.csv": 160235,
+      "feature_coverage.csv": 12,
+      "openfda_labels_clean.csv": 20000,
+      "quality_issues.csv": 9
+    },
+    "cross_source_xref_rows": 2537,
+    "dailymed": {
+      "labels_ingested": 0,
+      "status": "missing"
+    },
+    "ddinter": {
+      "base_name_collisions_after_normalization": 3,
+      "distinct_normalized_names": 1853,
+      "drugs": 1939,
+      "drugs_with_qualifier": 215,
+      "files_expected": [
+        "A",
+        "B",
+        "D",
+        "H",
+        "L",
+        "P",
+        "R",
+        "V"
+      ],
+      "files_present": [
+        "A",
+        "B",
+        "D",
+        "H",
+        "L",
+        "P",
+        "R",
+        "V"
+      ],
+      "ids_with_multiple_names": 0,
+      "legacy_json_check": {
+        "csv_rows_not_in_json": 0,
+        "description_equals_severity": 56367,
+        "json_rows": 56367,
+        "json_rows_not_in_csv": 0
+      },
+      "level_conflicts": 0,
+      "pairs": 160235,
+      "pairs_by_label": {
+        "Major": 26914,
+        "Minor": 6833,
+        "Moderate": 96675,
+        "NULL": 29813
+      },
+      "pairs_by_status": {
+        "labeled": 130422,
+        "unknown": 29813
+      },
+      "quarantine_reasons": {},
+      "quarantined_rows": 0,
+      "raw_rows": 222383,
+      "reversed_duplicate_pairs": 0,
+      "same_direction_duplicate_pairs": 43826
+    },
+    "openfda": {
+      "duplicate_ids_skipped": 0,
+      "hepatic_flag_true": 2668,
+      "ingestible_labels": 3910,
+      "labels": 20000,
+      "multi_product_names": 7,
+      "named_labels": 4049,
+      "names_longer_than_100": 34,
+      "raw_parts_expected": 14,
+      "raw_parts_present": 1,
+      "renal_flag_true": 3279,
+      "sections": 37197,
+      "sections_by_type": {
+        "contraindications": 6724,
+        "dosage_and_administration": 18956,
+        "drug_interactions": 5092,
+        "use_in_specific_populations": 3045,
+        "warnings_and_cautions": 3380
+      },
+      "source_rows": 20000,
+      "unnamed_labels": 15951,
+      "unnamed_pct": 79.8
+    },
+    "restricted_exports_not_committed": {},
+    "staging_table_rows": {
+      "dailymed_labels": 0,
+      "dailymed_sections": 0,
+      "ddinter_drugs": 1939,
+      "ddinter_pair_rows": 222383,
+      "ddinter_pairs": 160235,
+      "ddinter_raw": 222383,
+      "drug_rxcui": 1744,
+      "drug_xref": 2537,
+      "feature_coverage": 12,
+      "openfda_labels": 20000,
+      "openfda_sections": 37197,
+      "quality_issues": 9,
+      "source_files": 29
+    }
+  },
+  "before": {},
+  "crosswalk": {
+    "clinpgx_name_ambiguous_skipped": 11,
+    "clinpgx_rxcui_added": 228,
+    "clinpgx_single_drug_names": 9601,
+    "drugs": 1939,
+    "rxcui_ambiguous_skipped": 16,
+    "rxnorm_names_indexed": 6865
+  },
+  "feature_coverage": [
+    {
+      "feature": "severity_label (Major/Moderate/Minor)",
+      "category": "labels",
+      "available_rows": 130422,
+      "total_rows": 160235,
+      "status": "partial",
+      "source_needed": "DDInter (have it); 'Unknown' pairs need another source to be labelled",
+      "blocker": "Unknown pairs are NOT labels and are excluded; only 'labeled' pairs are trainable"
+    },
+    {
+      "feature": "negative_pairs (non-interacting drug pairs)",
+      "category": "labels",
+      "available_rows": 0,
+      "total_rows": 160235,
+      "status": "missing",
+      "source_needed": "A curated source of verified NON-interacting pairs (DDInter lists interacting pairs only)",
+      "blocker": "Without negatives only severity classification among known interactions is valid, not interaction/no-interaction prediction"
+    },
+    {
+      "feature": "ddinter_category_files",
+      "category": "coverage",
+      "available_rows": 8,
+      "total_rows": 8,
+      "status": "available",
+      "source_needed": "ddinter_downloads_code_{A,B,D,H,L,P,R,V}.csv from DDInter",
+      "blocker": "Present: A,B,D,H,L,P,R,V. Missing files cannot be downloaded here. Build environment has no access to this source (only repo files + PyPI reachable)."
+    },
+    {
+      "feature": "interaction_text_or_mechanism",
+      "category": "features",
+      "available_rows": 0,
+      "total_rows": 160235,
+      "status": "missing",
+      "source_needed": "DDInter interaction descriptions (web/API) or DrugBank interaction text",
+      "blocker": "CSV has no text; legacy JSON 'description' is a copy of the severity word"
+    },
+    {
+      "feature": "rxcui (RxNorm)",
+      "category": "identifiers",
+      "available_rows": 1744,
+      "total_rows": 1939,
+      "status": "partial",
+      "source_needed": "RxNorm RRF (free UMLS licence), placed in data_validation/external/ (git-ignored)",
+      "blocker": "Exact normalised-name match to RxNorm ingredient concepts (IN/PIN); ambiguous names skipped; ClinPGx fills a few more. Unmatched drugs stay NULL. Identifier only: it is not used as a model feature yet."
+    },
+    {
+      "feature": "cyp450_profile (substrate/inhibitor/inducer)",
+      "category": "features",
+      "available_rows": 0,
+      "total_rows": 1939,
+      "status": "blocked",
+      "source_needed": "FDA 'Table of Substrates, Inhibitors and Inducers' (public) or DrugBank enzymes",
+      "blocker": "Not in repo. Build environment has no access to this source (only repo files + PyPI reachable)."
+    },
+    {
+      "feature": "drugbank_id",
+      "category": "identifiers",
+      "available_rows": 0,
+      "total_rows": 1939,
+      "status": "blocked",
+      "source_needed": "DrugBank (academic licence)",
+      "blocker": "Not in repo. Build environment has no access to this source (only repo files + PyPI reachable)."
+    },
+    {
+      "feature": "openfda_labels_with_drug_name",
+      "category": "label_text",
+      "available_rows": 4049,
+      "total_rows": 20000,
+      "status": "partial",
+      "source_needed": "Re-extract names from RAW openFDA JSON (openfda.generic_name/brand_name/substance_name)",
+      "blocker": "Raw file is a Git-LFS pointer (632 MB not in repo). Names are not inferred from prose."
+    },
+    {
+      "feature": "openfda_raw_parts",
+      "category": "coverage",
+      "available_rows": 1,
+      "total_rows": 14,
+      "status": "partial",
+      "source_needed": "openFDA drug-label bulk files 1..14",
+      "blocker": "Only part 1 (20,000 labels) is in the repo. Build environment has no access to this source (only repo files + PyPI reachable)."
+    },
+    {
+      "feature": "dailymed_labels",
+      "category": "label_text",
+      "available_rows": 0,
+      "total_rows": 3694,
+      "status": "blocked",
+      "source_needed": "dm_spl_monthly_update_aug2026.zip",
+      "blocker": "Archive not in repo (only validation notes). Build environment has no access to this source (only repo files + PyPI reachable)."
+    },
+    {
+      "feature": "ddinter_drugs_linked_to_openfda_label_text",
+      "category": "linkage",
+      "available_rows": 550,
+      "total_rows": 1939,
+      "status": "partial",
+      "source_needed": "Better identifiers (RxCUI) would raise this above exact-name matching",
+      "blocker": "Exact normalised-name match only; no fuzzy matching (would risk wrong links)"
+    },
+    {
+      "feature": "structured_renal_hepatic_dose_rules",
+      "category": "features",
+      "available_rows": 0,
+      "total_rows": 0,
+      "status": "missing",
+      "source_needed": "Parsed + pharmacist-validated (drug, CrCl/eGFR band, adjustment) table",
+      "blocker": "Label text is narrative; renal_related/hepatic_related are keyword flags only"
+    }
+  ],
+  "generated_at_utc": "2026-10-23T07:11:51Z",
+  "inputs": [
+    {
+      "path": "data_validation/ddinter_downloads_code_A.csv",
+      "rows": 56367,
+      "sha256": "5bb75de36056f353b3788d5a8a71fb4e07f3bcfeb97537f73e53b371b556df0a"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_B.csv",
+      "rows": 15140,
+      "sha256": "76de5115a55587f0e822e1096b684fd3ddde058fbefcbb19896df58820ace130"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_D.csv",
+      "rows": 25681,
+      "sha256": "c0627ec39965dbe27829e4934cd20d71eb079f4e373287678737bba9423a306a"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_H.csv",
+      "rows": 11727,
+      "sha256": "f0f925f0ba1ee68c4668d3e7a6732719b34623b22a0f5d017f9090e59f63c88e"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_L.csv",
+      "rows": 65389,
+      "sha256": "f54f4486cc00344f8c86508c31c2ca3fad6d1d37ec3af5bcf609b4bbda5507ef"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_P.csv",
+      "rows": 5492,
+      "sha256": "83f8c0edb20d09ef29b8500b48f9623e208379525688ade9e70a7df2d8749d55"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_R.csv",
+      "rows": 30563,
+      "sha256": "1c39c3d4a6e41659b7a988538d7f363867592abc6f41a815de8746f6e2150574"
+    },
+    {
+      "path": "data_validation/ddinter_downloads_code_V.csv",
+      "rows": 12024,
+      "sha256": "353973fb300453946aea95733e8fb52338e4b59426d2ce6ca318363d4f84f10a"
+    },
+    {
+      "path": "data_validation/openFDA/openFDA_validated_labels_part1.csv",
+      "rows": 20000,
+      "sha256": "f5c3221c172d23d2a78657d574118eea91328d3e4a39d5eb8a73e8c688e5d764"
+    }
+  ],
+  "issues": [
+    {
+      "affected": 43826,
+      "check_name": "same_direction_duplicate_pairs_merged",
+      "dataset": "ddinter",
+      "detail": "exact repeated pair merged",
+      "severity": "info",
+      "total": 160235
+    },
+    {
+      "affected": 56367,
+      "check_name": "legacy_json_description_is_severity_echo",
+      "dataset": "ddinter",
+      "detail": "interaction_description == severity in legacy JSON; not carried into clean tables",
+      "severity": "warning",
+      "total": 56367
+    },
+    {
+      "affected": 3,
+      "check_name": "normalized_name_merges_different_base_drugs",
+      "dataset": "ddinter",
+      "detail": "{\"edetate disodium anhydrous\": [\"edetate calcium disodium anhydrous\", \"edetate disodium anhydrous\"], \"estrone\": [\"estrone\", \"estrone sulfate\"], \"silver\": [\"silver\", \"silver nitrate\"]}",
+      "severity": "error",
+      "total": 1853
+    },
+    {
+      "affected": 72,
+      "check_name": "route_or_salt_variants_share_normalized_name",
+      "dataset": "ddinter",
+      "detail": "e.g. 'Atropine' and 'Atropine (ophthalmic)'. Drug identity in staging is the DDInter ID, so these stay separate entities; join on ingredient_normalized if needed",
+      "severity": "info",
+      "total": 1853
+    },
+    {
+      "affected": 15951,
+      "check_name": "labels_without_drug_name",
+      "dataset": "openfda",
+      "detail": "brand_name and generic_name both empty in source extract; names not inferred",
+      "severity": "error",
+      "total": 20000
+    },
+    {
+      "affected": 7,
+      "check_name": "multi_product_names",
+      "dataset": "openfda",
+      "detail": "name field holds several products joined by ' | '; kept verbatim, not split",
+      "severity": "warning",
+      "total": 20000
+    },
+    {
+      "affected": 1,
+      "check_name": "raw_file_is_git_lfs_pointer",
+      "dataset": "openfda",
+      "detail": "drug-label-0001-of-0014.json",
+      "severity": "error",
+      "total": 1
+    },
+    {
+      "affected": 3694,
+      "check_name": "source_archive_missing",
+      "dataset": "dailymed",
+      "detail": "no DailyMed data ingested; parser is ready and tested (data_pipeline/dailymed.py)",
+      "severity": "error",
+      "total": 3694
+    }
+  ],
+  "ml_readiness": {
+    "class_distribution": {
+      "Major": 26914,
+      "Minor": 6833,
+      "Moderate": 96675
+    },
+    "conflict_pairs": 0,
+    "majority_class_share_pct": 74.1,
+    "missing_or_blocked_features": [
+      "negative_pairs (non-interacting drug pairs)",
+      "interaction_text_or_mechanism",
+      "cyp450_profile (substrate/inhibitor/inducer)",
+      "drugbank_id",
+      "dailymed_labels",
+      "structured_renal_hepatic_dose_rules"
+    ],
+    "split_warning": "Random pair-level splits leak drug identity; use drug-disjoint (cold-start) splits.",
+    "trainable_labeled_pairs": 130422,
+    "unusable_unknown_pairs": 29813,
+    "verdict": "LIMITED READINESS: the public model uses drug-name text only; no WHO-derived features are included."
+  },
+  "pipeline_version": "1.0.0",
+  "production_untouched": {
+    "after": {
+      "aegis_rx.db": null,
+      "aegis_rx.db-journal": null,
+      "aegis_rx.db-shm": null,
+      "aegis_rx.db-wal": null,
+      "aegis_rx.db.contaminated-backup": null
+    },
+    "before": {
+      "aegis_rx.db": null,
+      "aegis_rx.db-journal": null,
+      "aegis_rx.db-shm": null,
+      "aegis_rx.db-wal": null,
+      "aegis_rx.db.contaminated-backup": null
+    },
+    "unchanged": true
+  }
+}

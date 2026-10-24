@@ -1,0 +1,57 @@
+{
+  "lab_report_id": "LAB-2026-0002",
+  "case_id": "CASE-002",
+  "patient_identifier": "PT-002",
+  "patient_name": "Robert Chen",
+  "collection_date": "2026-10-08T07:45:00Z",
+  "report_date": "2026-10-08T08:20:00Z",
+  "category": "Renal Function & Electrolyte Panel",
+  "clinical_indication": "Evaluation of acute renal function decline in low-molecular-weight heparin therapy",
+  "source_document": "data/lab_reports/LAB-2026-0002.json",
+  "evidence_status": "Verified Locally",
+  "last_reviewed": "2026-10-08T08:25:00Z",
+  "laboratory_facility": "Local Hospital Pathology Laboratory (Internal Repository)",
+  "results": [
+    {
+      "test_name": "Serum Creatinine",
+      "result": "2.4",
+      "unit": "mg/dL",
+      "reference_range": "0.7 - 1.3",
+      "status": "High",
+      "clinical_significance": "Acute rise from baseline (1.0 -> 2.4 mg/dL), representing severe reduction in renal glomerular clearance."
+    },
+    {
+      "test_name": "Estimated GFR (CKD-EPI)",
+      "result": "28",
+      "unit": "mL/min/1.73m²",
+      "reference_range": "> 60",
+      "status": "Low",
+      "clinical_significance": "Severe renal impairment; enoxaparin clearance compromised, causing systemic anti-Xa bioaccumulation."
+    },
+    {
+      "test_name": "Blood Urea Nitrogen (BUN)",
+      "result": "38",
+      "unit": "mg/dL",
+      "reference_range": "7 - 20",
+      "status": "High",
+      "clinical_significance": "Azotemia secondary to decreased renal elimination."
+    },
+    {
+      "test_name": "Serum Potassium",
+      "result": "4.8",
+      "unit": "mEq/L",
+      "reference_range": "3.5 - 5.0",
+      "status": "Normal",
+      "clinical_significance": "Normokalemic."
+    },
+    {
+      "test_name": "Serum Sodium",
+      "result": "139",
+      "unit": "mEq/L",
+      "reference_range": "135 - 145",
+      "status": "Normal",
+      "clinical_significance": "Normal electrolyte osmolarity."
+    }
+  ],
+  "sha256_checksum": "a7b3c298fe1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b899"
+}
