@@ -195,8 +195,9 @@ class AuthService:
         for p_otp in prior_otps:
             p_otp.is_used = True
 
-        if is_demo and matched_persona:
-            otp_code = AuthConfig.DEMO_DEFAULT_OTP
+        demo_otp = AuthConfig.demo_otp(is_demo)
+        if is_demo and matched_persona and demo_otp:
+            otp_code = demo_otp
         else:
             otp_code = f"{secrets.randbelow(900000) + 100000}"
 
@@ -249,7 +250,7 @@ class AuthService:
             "expires_in_seconds": AuthConfig.OTP_EXPIRY_SECONDS,
             "resend_cooldown_seconds": AuthConfig.OTP_RESEND_COOLDOWN_SECONDS,
             "is_demo_mode": is_demo,
-            "preview_otp": delivery_result.preview_otp if is_demo else None,
+            "preview_otp": (delivery_result.preview_otp or provider.get_last_otp(normalized_phone)) if is_demo and hasattr(provider, "get_last_otp") else (delivery_result.preview_otp if is_demo else None),
             "user_found": user is not None,
             "user_role": user.role if user else (role_hint or "Doctor"),
             "user_name": user.full_name if user else None,
@@ -289,10 +290,10 @@ class AuthService:
         if otp_record and otp_record.expires_at > now and otp_record.attempts_remaining > 0:
             if hmac.compare_digest(otp_record.otp_hash, calculated_hash):
                 is_valid = True
-            elif (self.demo_mode or otp_record.is_demo) and clean_otp == AuthConfig.DEMO_DEFAULT_OTP:
-                is_valid = True
 
-        if not is_valid and self.demo_mode and clean_otp == AuthConfig.DEMO_DEFAULT_OTP:
+        demo_otp = AuthConfig.demo_otp(self.demo_mode or (otp_record.is_demo if otp_record else False))
+        is_demo_account = any(normalized_phone == self.normalize_phone(p["phone_number"]) for p in DEMO_PERSONAS)
+        if not is_valid and demo_otp and is_demo_account and hmac.compare_digest(clean_otp, demo_otp):
             is_valid = True
 
         if not is_valid:
@@ -341,7 +342,7 @@ class AuthService:
                 license_number=matched_persona.get("license_number") if matched_persona else f"LIC-{secrets.token_hex(3).upper()}",
                 email=matched_persona.get("email") if matched_persona else f"user_{normalized_phone[-4:]}@micromedx-health.org",
                 is_active=True,
-                totp_secret=matched_persona.get("totp_secret", pyotp.random_base32()),
+                totp_secret=matched_persona.get("totp_secret") if matched_persona else pyotp.random_base32(),
                 totp_enabled=True,
             )
             db.add(user)

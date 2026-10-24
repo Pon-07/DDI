@@ -1,3 +1,4 @@
+
 import os
 import tempfile
 import unittest
@@ -35,12 +36,19 @@ class TestAuthFlow(unittest.TestCase):
         Base.metadata.create_all(bind=self.engine)
         AuthBase.metadata.create_all(bind=self.engine)
 
-        self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
+        self.SessionLocal = sessionmaker(
+            autocommit=False,
+            autoflush=False,
+            bind=self.engine,
+        )
         self.db = self.SessionLocal()
 
         # Temp AuditLedger
         self.temp_dir = tempfile.TemporaryDirectory()
-        self.audit_db_path = os.path.join(self.temp_dir.name, "test_auth_audit.db")
+        self.audit_db_path = os.path.join(
+            self.temp_dir.name,
+            "test_auth_audit.db",
+        )
         self.audit_ledger = AuditLedger(db_path=self.audit_db_path)
 
         # Local Demo Provider
@@ -68,7 +76,7 @@ class TestAuthFlow(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_seed_demo_personas(self):
-        """Verify all 4 required roles (Doctor, Nurse, Clinical Pharmacist, Administrator) are seeded."""
+        """Verify all 4 required roles are seeded."""
         users = self.db.query(User).all()
         self.assertEqual(len(users), 4)
 
@@ -79,21 +87,26 @@ class TestAuthFlow(unittest.TestCase):
         self.assertIn("Administrator", roles)
 
     def test_request_otp_demo_mode(self):
-        """Verify OTP request in demo mode returns preview code for instant offline testing."""
+        """Verify OTP request in demo mode returns a preview code."""
         res = self.client.post(
             "/auth/otp/request",
-            json={"phone_number": "+15550192831", "demo_mode": True},
+            json={
+                "phone_number": "+15550192831",
+                "demo_mode": True,
+            },
         )
+
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertTrue(data["success"])
         self.assertTrue(data["is_demo_mode"])
         self.assertIsNotNone(data["preview_otp"])
-        self.assertEqual(data["preview_otp"], "123456")
+        self.assertEqual(len(data["preview_otp"]), 6)
+        self.assertTrue(data["preview_otp"].isdigit())
         self.assertIn("••••", data["phone_number_masked"])
 
     def test_production_mode_does_not_hardcode_or_leak_otp(self):
-        """Verify production mode generates crypto random OTP and does NOT leak code in client response."""
+        """Verify production mode generates a random OTP without leaking it."""
         prod_provider = LocalDemoOTPProvider(demo_mode=False)
         prod_auth_service = AuthService(
             audit_ledger=self.audit_ledger,
@@ -111,7 +124,7 @@ class TestAuthFlow(unittest.TestCase):
         self.assertIsNone(res["preview_otp"])
         self.assertFalse(res["is_demo_mode"])
 
-        # Code in delivery provider must be a 6-digit random code, not hardcoded 123456
+        # The generated code must be a six-digit numeric code.
         dispatches = prod_provider.get_recent_dispatches()
         self.assertTrue(len(dispatches) > 0)
         generated_otp = dispatches[0]["otp_code"]
@@ -119,15 +132,28 @@ class TestAuthFlow(unittest.TestCase):
         self.assertTrue(generated_otp.isdigit())
 
     def test_successful_otp_verification_creates_session_and_routes(self):
-        """Verify OTP verification creates session token, sets last_login_at, and returns role dashboard route."""
+        """Verify OTP verification creates a session and returns the dashboard route."""
         # 1. Request OTP for Doctor
-        self.client.post("/auth/otp/request", json={"phone_number": "+15550192831", "demo_mode": True})
+        request_res = self.client.post(
+            "/auth/otp/request",
+            json={
+                "phone_number": "+15550192831",
+                "demo_mode": True,
+            },
+        )
+        self.assertEqual(request_res.status_code, 200)
+        otp_code = request_res.json()["preview_otp"]
 
         # 2. Verify OTP
         res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192831", "otp_code": "123456", "role": "Doctor"},
+            json={
+                "phone_number": "+15550192831",
+                "otp_code": otp_code,
+                "role": "Doctor",
+            },
         )
+
         self.assertEqual(res.status_code, 200)
         data = res.json()
         self.assertTrue(data["success"])
@@ -139,37 +165,88 @@ class TestAuthFlow(unittest.TestCase):
 
         # 3. Check session in DB
         session_token = data["session_token"]
-        user_sess = self.db.query(UserSession).filter(UserSession.session_token == session_token).first()
+        user_sess = (
+            self.db.query(UserSession)
+            .filter(UserSession.session_token == session_token)
+            .first()
+        )
         self.assertIsNotNone(user_sess)
         self.assertTrue(user_sess.is_active)
         self.assertEqual(user_sess.role, "Doctor")
 
     def test_invalid_otp_fails_and_decrements_attempts(self):
         """Verify invalid OTP fails with 400 Bad Request and logs audit failure."""
-        self.client.post("/auth/otp/request", json={"phone_number": "+15550192832", "demo_mode": False})
+        self.client.post(
+            "/auth/otp/request",
+            json={
+                "phone_number": "+15550192832",
+                "demo_mode": False,
+            },
+        )
 
         res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192832", "otp_code": "000000"},
+            json={
+                "phone_number": "+15550192832",
+                "otp_code": "000000",
+            },
         )
+
         self.assertEqual(res.status_code, 400)
-        self.assertIn("Invalid or expired verification code", res.json()["detail"])
+        self.assertIn(
+            "Invalid or expired verification code",
+            res.json()["detail"],
+        )
 
     def test_role_based_routing_for_all_four_roles(self):
-        """Verify all 4 roles receive appropriate credentials and dashboard routes."""
+        """Verify all four roles receive appropriate credentials and dashboard routes."""
         test_cases = [
-            ("+15550192831", "Doctor", "/app/dashboard/doctor", "Dr. Sarah Lin, MD"),
-            ("+15550192832", "Nurse", "/app/dashboard/nurse", "Elena Rostova, RN"),
-            ("+15550192833", "Clinical Pharmacist", "/app/dashboard/clinical-pharmacist", "Marcus Vance, PharmD, BCPS"),
-            ("+15550192834", "Administrator", "/app/dashboard/administrator", "Arthur Pendelton, MS, CPHIMS"),
+            (
+                "+15550192831",
+                "Doctor",
+                "/app/dashboard/doctor",
+                "Dr. Sarah Lin, MD",
+            ),
+            (
+                "+15550192832",
+                "Nurse",
+                "/app/dashboard/nurse",
+                "Elena Rostova, RN",
+            ),
+            (
+                "+15550192833",
+                "Clinical Pharmacist",
+                "/app/dashboard/clinical-pharmacist",
+                "Marcus Vance, PharmD, BCPS",
+            ),
+            (
+                "+15550192834",
+                "Administrator",
+                "/app/dashboard/administrator",
+                "Arthur Pendelton, MS, CPHIMS",
+            ),
         ]
 
         for phone, role, expected_url, expected_name in test_cases:
-            self.client.post("/auth/otp/request", json={"phone_number": phone, "demo_mode": True})
+            request_res = self.client.post(
+                "/auth/otp/request",
+                json={
+                    "phone_number": phone,
+                    "demo_mode": True,
+                },
+            )
+            self.assertEqual(request_res.status_code, 200)
+            otp_code = request_res.json()["preview_otp"]
+
             verify_res = self.client.post(
                 "/auth/otp/verify",
-                json={"phone_number": phone, "otp_code": "123456", "role": role},
+                json={
+                    "phone_number": phone,
+                    "otp_code": otp_code,
+                    "role": role,
+                },
             )
+
             self.assertEqual(verify_res.status_code, 200)
             data = verify_res.json()
             self.assertEqual(data["role"], role)
@@ -177,13 +254,27 @@ class TestAuthFlow(unittest.TestCase):
             self.assertEqual(data["user"]["full_name"], expected_name)
 
     def test_authenticated_profile_and_logout(self):
-        """Verify /auth/me returns current user profile and /auth/logout invalidates the session."""
+        """Verify profile access and logout invalidate the session."""
         # Login
-        self.client.post("/auth/otp/request", json={"phone_number": "+15550192831", "demo_mode": True})
+        request_res = self.client.post(
+            "/auth/otp/request",
+            json={
+                "phone_number": "+15550192831",
+                "demo_mode": True,
+            },
+        )
+        self.assertEqual(request_res.status_code, 200)
+        otp_code = request_res.json()["preview_otp"]
+
         verify_res = self.client.post(
             "/auth/otp/verify",
-            json={"phone_number": "+15550192831", "otp_code": "123456", "role": "Doctor"},
+            json={
+                "phone_number": "+15550192831",
+                "otp_code": otp_code,
+                "role": "Doctor",
+            },
         )
+        self.assertEqual(verify_res.status_code, 200)
         token = verify_res.json()["session_token"]
 
         # Call /auth/me with Bearer token
@@ -210,21 +301,47 @@ class TestAuthFlow(unittest.TestCase):
         self.assertEqual(me_after_logout.status_code, 401)
 
     def test_audit_ledger_records_auth_lifecycle(self):
-        """Verify that every auth event (OTP request, login success, login fail, logout) is recorded in SHA-256 audit ledger."""
+        """Verify authentication lifecycle events are recorded in the audit ledger."""
         phone = "+15550192831"
 
         # 1. Request OTP
-        self.client.post("/auth/otp/request", json={"phone_number": phone, "demo_mode": True})
+        request_res = self.client.post(
+            "/auth/otp/request",
+            json={
+                "phone_number": phone,
+                "demo_mode": True,
+            },
+        )
+        self.assertEqual(request_res.status_code, 200)
+        otp_code = request_res.json()["preview_otp"]
 
         # 2. Failed attempt
-        self.client.post("/auth/otp/verify", json={"phone_number": phone, "otp_code": "999999", "role": "Doctor"})
+        self.client.post(
+            "/auth/otp/verify",
+            json={
+                "phone_number": phone,
+                "otp_code": "999999",
+                "role": "Doctor",
+            },
+        )
 
         # 3. Successful login
-        res = self.client.post("/auth/otp/verify", json={"phone_number": phone, "otp_code": "123456", "role": "Doctor"})
+        res = self.client.post(
+            "/auth/otp/verify",
+            json={
+                "phone_number": phone,
+                "otp_code": otp_code,
+                "role": "Doctor",
+            },
+        )
+        self.assertEqual(res.status_code, 200)
         token = res.json()["session_token"]
 
         # 4. Logout
-        self.client.post("/auth/logout", headers={"Authorization": f"Bearer {token}"})
+        self.client.post(
+            "/auth/logout",
+            headers={"Authorization": f"Bearer {token}"},
+        )
 
         # Verify audit ledger events
         events = self.audit_ledger.get_events()
