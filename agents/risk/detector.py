@@ -757,6 +757,52 @@ class RiskDetector:
                     )
                     findings.append(finding)
 
+            # Generalized Validated Drug-Drug Interaction / Contraindication Rules
+            elif r_type in {"drug_interaction", "contraindication"} and drug_a_rule and drug_b_rule:
+                norm_rule_a = normalizer.normalize(str(drug_a_rule)).lower().strip()
+                norm_rule_b = normalizer.normalize(str(drug_b_rule)).lower().strip()
+
+                has_drug_a = any(
+                    norm_rule_a == normalizer.normalize(d).lower().strip()
+                    or norm_rule_a in normalizer.normalize(d).lower().strip()
+                    for d in active_drugs
+                )
+                has_drug_b = any(
+                    norm_rule_b == normalizer.normalize(d).lower().strip()
+                    or norm_rule_b in normalizer.normalize(d).lower().strip()
+                    for d in active_drugs
+                )
+
+                if has_drug_a and has_drug_b and norm_rule_a != norm_rule_b:
+                    pair_sig = tuple(sorted([norm_rule_a, norm_rule_b]))
+                    sig = (str(r_id), pair_sig)
+                    if sig not in seen_finding_keys:
+                        seen_finding_keys.add(sig)
+                        seen_drug_pairs.add(pair_sig)
+
+                        finding = Finding(
+                            rule_id=str(r_id),
+                            severity=severity or "review_required",
+                            title=f"Validated Drug Interaction: {drug_a_rule} + {drug_b_rule}",
+                            description=ev_text or f"Validated interaction between {drug_a_rule} and {drug_b_rule}.",
+                            action=action or "review/hold/monitor; evaluate safer alternative",
+                            inputs={
+                                "drug_a": drug_a_rule,
+                                "drug_b": drug_b_rule,
+                                "patient_id": patient_id,
+                                "lab_count": len(clean_labs),
+                            },
+                            trace={
+                                "rule_id": str(r_id),
+                                "evidence_id": str(ev_id),
+                                "source": str(source),
+                                "source_version": str(source_ver),
+                                "matched_pair": sorted([norm_rule_a, norm_rule_b]),
+                            },
+                            source=str(source),
+                        )
+                        findings.append(finding)
+
         if filter_unchanged and previous_findings:
             findings = self.filter_unchanged_findings(findings, previous_findings)
 

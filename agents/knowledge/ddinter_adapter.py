@@ -89,10 +89,29 @@ class DDInterIngestionAdapter:
             for d_a, d_b, src, ev_id in existing_interactions:
                 n_a = self.normalizer.normalize(d_a) or d_a.lower().strip()
                 n_b = self.normalizer.normalize(d_b) or d_b.lower().strip()
-                self._known_interactions.add((n_a, n_b, src, ev_id))
+                self._known_interactions.add(self._pair_key(n_a, n_b, src, ev_id))
         except Exception:
             # If tables are uninitialized or empty, ignore
             pass
+
+    @staticmethod
+    def _pair_key(
+        n_a: str, n_b: str, source: str, evidence_id: Optional[str]
+    ) -> Tuple[str, str, str, Optional[str]]:
+        """
+        Order-insensitive identity of an interaction.
+
+        DDInter lists each unordered pair once per category file, so the same pair can
+        arrive as (A, B) in one file and (B, A) in another. Both names and the
+        "DDInterX | DDInterY" evidence id are sorted so the reversed row is recognised as
+        the SAME record (and skipped) instead of being stored twice. No reverse rows are
+        ever synthesised.
+        """
+        lo, hi = sorted((n_a, n_b))
+        ev = evidence_id
+        if ev and " | " in ev:
+            ev = " | ".join(sorted(part.strip() for part in ev.split(" | ")))
+        return (lo, hi, source, ev)
 
     def _is_valid_text(self, val: object) -> bool:
         """Check if a field value is non-empty and meaningful (allows 'unknown')."""
@@ -233,7 +252,7 @@ class DDInterIngestionAdapter:
             self._get_or_create_drug(drug_b_raw, source_name, result)
 
             # 2. Idempotently insert InteractionEvidence
-            interaction_key = (norm_a, norm_b, source_name, evidence_id)
+            interaction_key = self._pair_key(norm_a, norm_b, source_name, evidence_id)
 
             if interaction_key in self._known_interactions:
                 result.interaction_evidences_skipped += 1

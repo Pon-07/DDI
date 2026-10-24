@@ -20,6 +20,7 @@ from models.models import RuleVersion, SafetyRule
 
 PACKS_DIR = Path(__file__).resolve().parent / "packs"
 DEMO_RULE_PACK_PATH = PACKS_DIR / "aegis_hackathon_demo_v1.json"
+VALIDATED_DDI_PACK_PATH = PACKS_DIR / "aegis_validated_ddi_v1.json"
 
 CANONICAL_RULE_FIELDS = (
     "rule_id",

@@ -4547,6 +4547,19 @@ def get_micromedx_console_html():
       }
       location.reload();
     }
+
+  <!-- Standalone ML Severity Advisory Integration -->
+  <div id="ml-severity-advisory-panel" style="display:none;" aria-hidden="true">
+    <h3>ML Severity Advisory</h3>
+    <form id="pair-form">
+      <input id="drug-a" placeholder="Drug A">
+      <input id="drug-b" placeholder="Drug B">
+      <label><input id="documented" type="checkbox"> An interaction is documented by a validated source</label>
+      <button type="submit">Get advisory</button>
+    </form>
+    <pre id="result">Loading model status...</pre>
+  </div>
+
   </script>
 </body>
 </html>"""
