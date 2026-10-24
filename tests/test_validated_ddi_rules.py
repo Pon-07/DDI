@@ -89,7 +89,7 @@ class TestValidatedDDIRules(unittest.TestCase):
         self.assertEqual(hash_res.stored_hash, hash_res.computed_hash)
 
     def test_dolutegravir_aluminum_hydroxide_interaction(self):
-        """2. Verify Dolutegravir + Aluminum hydroxide chelation rule."""
+        """2. Verify Dolutegravir + Aluminum hydroxide validated rule."""
         meds = ["Dolutegravir 50mg oral daily", "Aluminum Hydroxide 400mg oral"]
         findings = self.detector.detect(medications=meds)
 
@@ -99,16 +99,17 @@ class TestValidatedDDIRules(unittest.TestCase):
         self.assertEqual(f.severity, "Major")
         self.assertEqual(f.source, "DDInter")
         self.assertEqual(f.trace.get("evidence_id"), "DDInter58 | DDInter582")
-        self.assertIn("chelation", f.description.lower())
+        self.assertIn("major interaction", f.description.lower())
 
         # Test resolution
         resolution = self.resolver.resolve_finding(f)
         self.assertGreater(len(resolution.candidates), 0)
         top = resolution.candidates[0]
-        self.assertIn("stagger administration", top.description.lower())
+        self.assertIn("review/hold/monitor", top.description.lower())
+        self.assertIn("evaluate safer alternative", top.description.lower())
 
     def test_simvastatin_clarithromycin_rhabdomyolysis_risk(self):
-        """3. Verify Simvastatin + Clarithromycin CYP3A4 inhibition rule."""
+        """3. Verify Simvastatin + Clarithromycin validated rule."""
         meds = ["Simvastatin 40mg", "Clarithromycin 500mg"]
         findings = self.detector.detect(medications=meds)
 
@@ -118,14 +119,15 @@ class TestValidatedDDIRules(unittest.TestCase):
         self.assertEqual(f.severity, "Major")
         self.assertEqual(f.source, "DDInter")
         self.assertEqual(f.trace.get("evidence_id"), "DDInter1675 | DDInter393")
-        self.assertIn("rhabdomyolysis", f.description.lower())
+        self.assertIn("major interaction", f.description.lower())
 
         resolution = self.resolver.resolve_finding(f)
         self.assertGreater(len(resolution.candidates), 0)
-        self.assertIn("suspend simvastatin", resolution.candidates[0].description.lower())
+        self.assertIn("review/hold/monitor", resolution.candidates[0].description.lower())
+        self.assertIn("evaluate safer alternative", resolution.candidates[0].description.lower())
 
     def test_digoxin_clarithromycin_pgp_risk(self):
-        """4. Verify Digoxin + Clarithromycin P-gp inhibition rule."""
+        """4. Verify Digoxin + Clarithromycin validated rule."""
         meds = ["Digoxin 0.125mg", "Clarithromycin 250mg"]
         findings = self.detector.detect(medications=meds)
 
@@ -135,7 +137,12 @@ class TestValidatedDDIRules(unittest.TestCase):
         self.assertEqual(f.severity, "Major")
         self.assertEqual(f.source, "DDInter")
         self.assertEqual(f.trace.get("evidence_id"), "DDInter554 | DDInter393")
-        self.assertIn("digitalis toxicity", f.description.lower())
+        self.assertIn("major interaction", f.description.lower())
+
+        resolution = self.resolver.resolve_finding(f)
+        self.assertGreater(len(resolution.candidates), 0)
+        self.assertIn("review/hold/monitor", resolution.candidates[0].description.lower())
+        self.assertIn("evaluate safer alternative", resolution.candidates[0].description.lower())
 
     def test_symmetric_pair_matching_commutative(self):
         """5. Verify drug pair matching is commutative (order of administration yields identical results)."""
