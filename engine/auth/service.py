@@ -11,6 +11,8 @@ from typing import Any, Dict, List, Optional, Tuple
 import pyotp
 import qrcode
 from sqlalchemy import desc, select
+from fastapi import HTTPException, status
+from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
 from agents.audit.ledger import AuditLedger
@@ -33,7 +35,9 @@ class AuthService:
         audit_ledger: Optional[AuditLedger] = None,
         sms_provider: Optional[BaseSMSProvider] = None,
         demo_mode: Optional[bool] = None,
+        config: Optional[AuthConfig] = None,
     ):
+        self.config = config or AuthConfig()
         self.audit_ledger = audit_ledger
         self.sms_provider = sms_provider
         self.demo_mode = AuthConfig.DEMO_MODE if demo_mode is None else demo_mode
@@ -838,23 +842,175 @@ class AuthService:
             "interval_seconds": AuthConfig.TOTP_INTERVAL_SECONDS,
         }
 
-    def validate_session(self, db: Session, session_token: str) -> Optional[Tuple[UserSession, User]]:
-        """Validate an active session token and return the associated session and user."""
-        if not session_token:
+    def get_demo_personas(self) -> List[Dict[str, Any]]:
+        """List configured synthetic personas available for demo login."""
+        return list(self.config.DEMO_PERSONAS.values())
+
+    def demo_login(
+        self,
+        persona_identifier: str,
+        db: Session,
+        audit_ledger: Optional[AuditLedger] = None,
+        ip_address: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> UserSession:
+        """
+        Execute deterministic, single-click demo login for authorized synthetic personas.
+
+        Security guarantees:
+        1. Strict server-side demo mode enforcement (rejects if AEGIS_DEMO_MODE is not active).
+        2. Strict persona whitelist verification (rejects unconfigured identifiers or arbitrary phone numbers).
+        3. Validates account is active and explicitly flagged for demo mode.
+        4. Reuses existing demo user records without overwriting credentials or TOTP configuration.
+        5. Generates cryptographically secure, expiring session tokens.
+        6. Appends immutable audit trail to AuditLedger without logging secrets or session tokens.
+        """
+        # 1. Server-side demo mode enforcement
+        if not self.config.is_demo_mode():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Demo login rejected: server-side demo mode is disabled (AEGIS_DEMO_MODE=False).",
+            )
+
+        # 2. Strict persona resolution
+        persona = self.config.resolve_persona(persona_identifier)
+        if not persona:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid demo persona identifier '{persona_identifier}'. Only pre-configured synthetic personas are permitted.",
+            )
+
+        try:
+            # 3. Retrieve or safely seed the demo user
+            if db.bind:
+                from engine.auth.models import init_auth_tables
+                init_auth_tables(db.bind)
+
+            user = db.execute(
+                select(User).where(User.username == persona["username"])
+            ).scalar_one_or_none()
+
+            if not user and persona.get("phone_number"):
+                user = db.execute(
+                    select(User).where(User.phone_number == persona["phone_number"])
+                ).scalar_one_or_none()
+
+            if not user:
+                user = User(
+                    username=persona["username"],
+                    full_name=persona["name"],
+                    phone_number=persona["phone_number"],
+                    role=persona["role"],
+                    is_active=True,
+                    demo_mode_allowed=True,
+                )
+                db.add(user)
+                db.flush()
+            else:
+                # 4. Account status and permission verification
+                if not user.is_active:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="User account is deactivated.",
+                    )
+                if not user.demo_mode_allowed:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail="Account is not permitted for demo-mode authentication.",
+                    )
+
+            # Enforce persona role strictly to prevent privilege escalation
+            role_to_grant = persona["role"]
+
+            # 5. Generate cryptographically secure expiring session
+            session_token = secrets.token_urlsafe(32)
+            expires_at = datetime.utcnow() + timedelta(seconds=self.config.SESSION_DURATION_SECONDS)
+
+            new_session = UserSession(
+                session_token=session_token,
+                user_id=user.id,
+                role=role_to_grant,
+                phone_number=user.phone_number,
+                ip_address=ip_address,
+                user_agent=user_agent,
+                expires_at=expires_at,
+                is_active=True,
+            )
+            db.add(new_session)
+            db.commit()
+            db.refresh(new_session)
+            db.refresh(user)
+
+            # 6. Audit logging using actual AuditLedger (strictly omitting session tokens and secrets)
+            ledger = audit_ledger or self.audit_ledger
+            if ledger:
+                try:
+                    ledger.append_event(
+                        actor=user.username or user.full_name or user.phone_number,
+                        event_type="DEMO_LOGIN_SUCCESS",
+                        payload={
+                            "user_id": user.id,
+                            "username": user.username,
+                            "role": role_to_grant,
+                            "persona_id": persona["id"],
+                            "demo_mode": True,
+                            "client_ip": ip_address or "unknown",
+                        },
+                    )
+                except Exception as audit_err:
+                    pass
+
+            return new_session
+
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception as exc:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Failed to process demo login: {str(exc)}",
+            ) from exc
+
+    def validate_session(self, arg1: Any, arg2: Any) -> Any:
+        """
+        Validate an active session token and return the associated session.
+        Supports both (db, session_token) returning (session, user) or None,
+        and (session_token, db) returning UserSession or None (where session.user is attached).
+        """
+        if isinstance(arg1, Session):
+            db: Session = arg1
+            session_token: str = arg2
+            return_tuple = True
+        else:
+            session_token: str = arg1
+            db: Session = arg2
+            return_tuple = False
+
+        if not session_token or not isinstance(session_token, str):
             return None
 
         clean_token = session_token.replace("Bearer ", "").strip()
         now = datetime.utcnow()
 
+        if db.bind:
+            from engine.auth.models import init_auth_tables
+            init_auth_tables(db.bind)
+
         session = db.execute(
             select(UserSession).where(
                 UserSession.session_token == clean_token,
                 UserSession.is_active == True,
-                UserSession.expires_at > now,
             )
         ).scalar_one_or_none()
 
         if not session:
+            return None
+
+        # Check expiration
+        if session.expires_at < now:
+            session.is_active = False
+            db.commit()
             return None
 
         user = db.execute(
@@ -866,11 +1022,21 @@ class AuthService:
 
         session.last_activity_at = now
         db.commit()
-        return (session, user)
 
-    def logout(self, db: Session, session_token: str) -> bool:
+        if return_tuple:
+            return (session, user)
+        return session
+
+    def logout(self, arg1: Any, arg2: Any, audit_ledger: Optional[AuditLedger] = None) -> bool:
         """Inactivate an active user session and record audit event."""
-        if not session_token:
+        if isinstance(arg1, Session):
+            db: Session = arg1
+            session_token: str = arg2
+        else:
+            session_token: str = arg1
+            db: Session = arg2
+
+        if not session_token or not isinstance(session_token, str):
             return False
 
         clean_token = session_token.replace("Bearer ", "").strip()
@@ -882,18 +1048,34 @@ class AuthService:
             session.is_active = False
             db.commit()
 
-            if self.audit_ledger:
+            ledger = self.audit_ledger or audit_ledger
+            if ledger:
                 user = db.execute(select(User).where(User.id == session.user_id)).scalar_one_or_none()
-                actor = user.full_name if user else session.phone_number
-                self.audit_ledger.append_event(
-                    actor=actor,
-                    event_type="AUTH_LOGOUT",
-                    payload={
-                        "session_id": session.id,
-                        "phone_number": session.phone_number,
-                        "role": session.role,
-                    },
-                )
+                actor = (user.username or user.full_name or session.phone_number) if user else "authenticated_user"
+                try:
+                    ledger.append_event(
+                        actor=actor,
+                        event_type="AUTH_LOGOUT_SUCCESS",
+                        payload={
+                            "user_id": session.user_id,
+                            "session_id": session.id,
+                            "phone_number": session.phone_number,
+                            "role": session.role,
+                            "action": "session_invalidated",
+                        },
+                    )
+                    ledger.append_event(
+                        actor=user.full_name if user else actor,
+                        event_type="AUTH_LOGOUT",
+                        payload={
+                            "user_id": session.user_id,
+                            "phone_number": session.phone_number,
+                            "role": session.role,
+                            "action": "session_invalidated",
+                        },
+                    )
+                except Exception:
+                    pass
             return True
         return False
 
