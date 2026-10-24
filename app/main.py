@@ -17,6 +17,7 @@ from app.routers import (
 )
 from app.schemas import SystemStatusResponse
 from database.database import get_db
+from engine.auth.routers import auth_router
 
 app = FastAPI(
     title="AEGIS Rx",
@@ -24,6 +25,7 @@ app = FastAPI(
     version="0.1.0",
 )
 
+app.include_router(auth_router)
 app.include_router(patients.router)
 app.include_router(medications.router)
 app.include_router(labs.router)

@@ -348,6 +348,28 @@ def get_demo_html():
       font-size: 0.8rem;
       border-left: 3px solid var(--accent);
     }
+    .auth-bar {
+      background: #111827;
+      border-bottom: 1px solid var(--border);
+      padding: 0.75rem 2rem;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.9rem;
+    }
+    .auth-controls {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    select {
+      background: var(--card-bg);
+      color: #fff;
+      border: 1px solid var(--border);
+      padding: 0.4rem 0.8rem;
+      border-radius: 0.4rem;
+      font-size: 0.85rem;
+    }
   </style>
 </head>
 <body>
@@ -360,6 +382,23 @@ def get_demo_html():
       <span class="badge badge-offline">Offline Verified</span>
       <span class="badge badge-rule">Zero External Calls</span>
       <span class="badge" style="background:#701a75;color:#f472b6;">Cosign Enforced</span>
+    </div>
+  </div>
+
+  <div class="auth-bar">
+    <div class="auth-controls">
+      <span><strong>Evaluator Persona:</strong></span>
+      <select id="persona-select">
+        <option value="doctor">Demo Doctor (+15555550101)</option>
+        <option value="nurse">Demo Nurse (+15555550102)</option>
+        <option value="pharmacist">Demo Pharmacist (+15555550103)</option>
+        <option value="administrator">Demo Administrator (+15555550104)</option>
+      </select>
+      <button class="btn" style="padding:0.4rem 0.8rem;font-size:0.85rem;" onclick="handleDemoLogin()">Demo Login</button>
+      <button class="btn btn-secondary" style="padding:0.4rem 0.8rem;font-size:0.85rem;" onclick="handleLogout()">Logout</button>
+    </div>
+    <div id="auth-status" style="color:var(--text-muted);">
+      <span id="session-badge" class="badge" style="background:#334155;color:#94a3b8;">Not Logged In</span>
     </div>
   </div>
 
@@ -416,12 +455,62 @@ def get_demo_html():
 
     <div class="output-panel">
       <h2>Pipeline Execution Output</h2>
-      <div id="status-banner" style="color:var(--text-muted); margin-bottom: 0.5rem;">Select a scenario above to execute through the live offline pipeline.</div>
+      <div id="status-banner" style="color:var(--text-muted); margin-bottom: 0.5rem;">Select a persona to log in, or execute a scenario through the live offline pipeline.</div>
       <pre id="output-json">// Pipeline output will display here...</pre>
     </div>
   </div>
 
   <script>
+    async function checkAuth() {
+      try {
+        const res = await fetch("/auth/me");
+        if (res.ok) {
+          const user = await res.json();
+          document.getElementById("session-badge").outerHTML = '<span id="session-badge" class="badge" style="background:#064e3b;color:#10b981;">Authenticated: ' + user.full_name + ' (' + user.role + ')</span>';
+        } else {
+          document.getElementById("session-badge").outerHTML = '<span id="session-badge" class="badge" style="background:#334155;color:#94a3b8;">Not Logged In</span>';
+        }
+      } catch (e) {
+        // ignore offline errors
+      }
+    }
+
+    async function handleDemoLogin() {
+      const persona = document.getElementById("persona-select").value;
+      const banner = document.getElementById("status-banner");
+      banner.innerText = "Authenticating as demo persona '" + persona + "'...";
+      try {
+        const res = await fetch("/auth/demo-login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ persona_identifier: persona })
+        });
+        const data = await res.json();
+        document.getElementById("output-json").innerText = JSON.stringify(data, null, 2);
+        if (res.ok) {
+          banner.innerHTML = "<strong style='color:var(--success)'>Demo Login Successful:</strong> Authenticated as <strong>" + data.user.full_name + "</strong> (" + data.role + "). Audit ledger recorded.";
+          checkAuth();
+        } else {
+          banner.innerHTML = "<strong style='color:var(--danger)'>Demo Login Rejected:</strong> " + (data.detail || JSON.stringify(data));
+        }
+      } catch (err) {
+        banner.innerText = "Demo login error: " + err;
+      }
+    }
+
+    async function handleLogout() {
+      const banner = document.getElementById("status-banner");
+      try {
+        const res = await fetch("/auth/logout", { method: "POST" });
+        const data = await res.json();
+        document.getElementById("output-json").innerText = JSON.stringify(data, null, 2);
+        banner.innerText = "Logged out successfully.";
+        checkAuth();
+      } catch (err) {
+        banner.innerText = "Logout error: " + err;
+      }
+    }
+
     async function seedPatients() {
       const banner = document.getElementById("status-banner");
       banner.innerText = "Seeding demo patients...";
@@ -448,6 +537,9 @@ def get_demo_html():
         banner.innerText = "Error: " + err;
       }
     }
+
+    // Check auth on load
+    checkAuth();
   </script>
 </body>
 </html>
