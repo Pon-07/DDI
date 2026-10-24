@@ -1,0 +1,49 @@
+{
+  "pack_name": "aegis_validated_ddi",
+  "version": "1.0.0",
+  "description": "Deterministic safety rules for major drug-drug interactions validated against the DDInter dataset in data_validation/ddinter_normalized.json.",
+  "rules": [
+    {
+      "rule_id": "AEGIS-VAL-001-DOLUTEGRAVIR-ALUMINUM",
+      "rule_type": "drug_interaction",
+      "category": "drug_drug_interaction",
+      "drug_a": "dolutegravir",
+      "drug_b": "aluminum hydroxide",
+      "source": "DDInter",
+      "source_version": "2.0.0",
+      "evidence_id": "DDInter58 | DDInter582",
+      "evidence_text": "DDInter validated major interaction: Concomitant use of dolutegravir with polyvalent cation-containing antacids (such as aluminum hydroxide) significantly reduces dolutegravir absorption via chelation.",
+      "severity": "Major",
+      "action": "stagger administration or evaluate alternative; polyvalent cation chelation impairs absorption",
+      "status": "active"
+    },
+    {
+      "rule_id": "AEGIS-VAL-002-SIMVASTATIN-CLARITHROMYCIN",
+      "rule_type": "drug_interaction",
+      "category": "drug_drug_interaction",
+      "drug_a": "simvastatin",
+      "drug_b": "clarithromycin",
+      "source": "DDInter",
+      "source_version": "2.0.0",
+      "evidence_id": "DDInter1675 | DDInter393",
+      "evidence_text": "DDInter validated major interaction: Clarithromycin is a potent CYP3A4 inhibitor that markedly increases simvastatin plasma concentrations, substantially increasing the risk of myopathy and rhabdomyolysis.",
+      "severity": "Major",
+      "action": "suspend simvastatin therapy during macrolide course; CYP3A4 inhibition markedly increases rhabdomyolysis risk",
+      "status": "active"
+    },
+    {
+      "rule_id": "AEGIS-VAL-003-DIGOXIN-CLARITHROMYCIN",
+      "rule_type": "drug_interaction",
+      "category": "drug_drug_interaction",
+      "drug_a": "digoxin",
+      "drug_b": "clarithromycin",
+      "source": "DDInter",
+      "source_version": "2.0.0",
+      "evidence_id": "DDInter554 | DDInter393",
+      "evidence_text": "DDInter validated major interaction: Clarithromycin inhibits P-glycoprotein efflux transport, leading to significant elevation of serum digoxin levels and risk of digitalis toxicity.",
+      "severity": "Major",
+      "action": "monitor serum digoxin levels closely and evaluate dose reduction; P-gp inhibition increases digitalis toxicity risk",
+      "status": "active"
+    }
+  ]
+}
