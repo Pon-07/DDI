@@ -249,6 +249,7 @@ class ChainVerificationResponse(BaseModel):
     total_records: int
     errors: List[str] = Field(default_factory=list)
     tampered_record_id: Optional[int] = None
+    message: Optional[str] = None
 
 
 class SystemStatusResponse(BaseModel):

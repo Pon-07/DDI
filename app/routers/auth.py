@@ -159,6 +159,32 @@ def verify_otp(
         )
 
 
+@router.get("/session", summary="Inspect active authentication session status")
+def get_auth_session(
+    optional_user: Optional[User] = Depends(get_optional_user),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Returns current session status. If authenticated, returns user details;
+    otherwise returns authenticated=False without raising HTTP 401.
+    """
+    if not optional_user:
+        return {"authenticated": False, "user": None}
+    return {
+        "authenticated": True,
+        "user": {
+            "id": optional_user.id,
+            "phone_number": optional_user.phone_number,
+            "phone_number_masked": auth_service.mask_phone(optional_user.phone_number),
+            "full_name": optional_user.full_name,
+            "role": optional_user.role,
+            "department": optional_user.department,
+            "license_number": optional_user.license_number,
+            "email": optional_user.email,
+        },
+    }
+
+
 @router.get("/me", response_model=UserResponseSchema, summary="Get current authenticated user profile")
 def get_current_user_profile(
     current_user: User = Depends(get_current_user),

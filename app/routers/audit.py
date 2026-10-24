@@ -13,15 +13,26 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
     response_model=ChainVerificationResponse,
     summary="Cryptographically verify audit ledger hash-chain integrity",
 )
+@router.get(
+    "/verify-chain",
+    response_model=ChainVerificationResponse,
+    summary="Cryptographically verify audit ledger hash-chain integrity",
+)
 def verify_audit_chain(
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
 ):
     result = audit_ledger.verify_chain()
+    msg = (
+        f"Chain intact with zero tampering detected across all {result.total_records} blocks."
+        if result.is_valid
+        else "Chain tampering detected!"
+    )
     return ChainVerificationResponse(
         is_valid=result.is_valid,
         total_records=result.total_records,
         errors=result.errors,
         tampered_record_id=result.tampered_record_id,
+        message=msg,
     )
 
 

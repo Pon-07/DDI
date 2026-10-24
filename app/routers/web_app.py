@@ -6,6 +6,8 @@ router = APIRouter(tags=["Web Application"])
 
 @router.get("/", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")
 @router.get("/app", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")
+@router.get("/app/dashboard/{role}", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")
+@router.get("/app/{path:path}", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")
 def get_micromedx_console_html():
     """
     DDI — Clinical Decision Support & Medication Safety Platform.
@@ -4528,6 +4530,7 @@ def get_micromedx_console_html():
             appState.currentUser = data.user;
             appState.activeRole = data.user.role || 'Doctor';
             enterApplication(appState.activeRole, data.user);
+            return;
           }
         }
       } catch (err) {

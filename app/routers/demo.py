@@ -544,7 +544,7 @@ def get_demo_html():
 <body>
   <div class="header">
     <div>
-      <h1>MICROMEDX</h1>
+      <h1>MICROMEDX — AEGIS Rx</h1>
       <small style="color:var(--text-muted)">Clinical Decision Support & Medication Safety Platform</small>
     </div>
     <div style="display:flex; gap:0.5rem;">
@@ -556,7 +556,7 @@ def get_demo_html():
 
   <div class="container">
     <div style="display:flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
-      <h2 style="margin:0; font-family:var(--font-heading); font-weight:700; color:var(--text); font-size:1.25rem;">Clinical Safety Scenarios</h2>
+      <h2 style="margin:0; font-family:var(--font-heading); font-weight:700; color:var(--text); font-size:1.25rem;">Clinical Safety Scenarios (Official Hackathon Demo Scenarios)</h2>
       <button class="btn btn-secondary" onclick="seedPatients()">Sync & Seed Clinical Patients</button>
     </div>
 

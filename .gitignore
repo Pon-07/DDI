@@ -28,5 +28,8 @@ data/processed/*
 
 # OS
 .DS_Store
-Thumbs.dbaegis_rx.db
+Thumbs.db
+
+# Database files
 aegis_rx.db
+aegis_rx.db*
