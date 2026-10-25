@@ -1,4 +1,6 @@
+import os
 from fastapi import Depends, FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -17,6 +19,7 @@ from app.routers import (
     orders,
     patients,
     simulated_orders,
+    substitutions,
     web_app,
 )
 from app.schemas import SystemStatusResponse
@@ -53,8 +56,33 @@ app = FastAPI(
     version="0.1.0",
 )
 
+# Configure CORS strictly for trusted local origins (no unrestricted wildcards with credentials)
+cors_origins_env = os.getenv("AEGIS_CORS_ORIGINS", "")
+trusted_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+if cors_origins_env:
+    for origin in cors_origins_env.split(","):
+        cleaned = origin.strip()
+        if cleaned and cleaned not in trusted_origins:
+            trusted_origins.append(cleaned)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=trusted_origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth.router)
 app.include_router(dashboards.router)
+app.include_router(substitutions.router)
 app.include_router(web_app.router)
 app.include_router(patients.router)
 app.include_router(medications.router)
@@ -68,14 +96,32 @@ app.include_router(demo.router)
 app.include_router(ml_advisory.router)
 
 
-@app.get("/")
+@app.get("/", summary="AEGIS Rx REST API Root & Directory")
 def read_root():
     return {
         "name": "AEGIS Rx",
-        "description": "Offline Medication Safety Platform",
+        "description": "Offline Medication Safety Platform - REST API",
         "version": "0.1.0",
         "status": "online",
         "mode": "offline-capable",
+        "docs_url": "/docs",
+        "openapi_url": "/openapi.json",
+        "endpoints": {
+            "auth": "/api/auth",
+            "dashboards": "/api/dashboard",
+            "substitutions": "/api/substitutions",
+            "findings": "/findings",
+            "medications": "/medications",
+            "orders": "/orders",
+            "patients": "/patients",
+            "labs": "/labs",
+            "events": "/events",
+            "audit": "/audit",
+            "ml_advisory": "/ml",
+            "status": "/status",
+            "health": "/health",
+            "legacy_console": "/app",
+        },
     }
 
 

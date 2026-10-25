@@ -4,7 +4,7 @@ from fastapi.responses import HTMLResponse
 router = APIRouter(tags=["Web Application"])
 
 
-@router.get("/", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")
+# Legacy web console mounted under /app for backward compatibility with frontend integration tests
 @router.get("/app", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")
 @router.get("/app/dashboard/{role}", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")
 @router.get("/app/{path:path}", response_class=HTMLResponse, summary="Clinical Medication Safety Decision Support Console")

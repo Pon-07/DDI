@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -264,5 +264,66 @@ class SystemStatusResponse(BaseModel):
     total_audit_records: int
 
 
+class SubstitutionRequestCreate(BaseModel):
+    patient_id: int = Field(..., description="Target patient database ID")
+    order_id: int = Field(..., description="Prescription / Order database ID")
+    medication_id: int = Field(..., description="Medication ID linked to prescription")
+    idempotency_key: str = Field(..., min_length=16, max_length=128, description="Unique client idempotency key")
+    suggested_brand: str = Field(..., min_length=1, max_length=255, description="Clinically suggested alternative brand name")
+    reason: str = Field(..., min_length=1, max_length=1000, description="Clinical reason for substitution")
+    pharmacist_notes: Optional[str] = Field(None, max_length=2000, description="Additional notes from pharmacist")
 
 
+PharmacistSubstitutionRequest = SubstitutionRequestCreate
+
+
+class SubstitutionRequestResponse(BaseModel):
+    request_id: int
+    case_id: str
+    status: str
+    message: str
+    audit_event_id: Optional[int] = None
+    audit_hash: Optional[str] = None
+
+
+class SubstitutionDecisionRequest(BaseModel):
+    request_id: int = Field(..., description="ID of pending substitution request")
+    decision: Literal["APPROVED", "REJECTED", "CLARIFICATION_REQUIRED"] = Field(..., description="Doctor's decision")
+    doctor_notes: Optional[str] = Field(None, max_length=2000, description="Doctor rationale or clinical notes")
+
+
+DoctorSubstitutionDecisionRequest = SubstitutionDecisionRequest
+
+
+class SubstitutionDecisionResponse(BaseModel):
+    request_id: int
+    status: str
+    decision: str
+    message: str
+    audit_event_id: Optional[int] = None
+    audit_hash: Optional[str] = None
+    ready_for_dispensing: bool
+
+
+class SubstitutionDetailResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    request_id: int
+    case_id: str
+    patient_id: int
+    patient_identifier: str
+    patient_name: str
+    order_id: int
+    medication_id: int
+    prescribed_medicine: str
+    original_prescription: str
+    prescribed_brand: str
+    suggested_brand: str
+    reason: str
+    pharmacist_note: str = ""
+    pharmacist_name: str
+    request_date: Optional[str] = None
+    status: str
+    doctor_notes: Optional[str] = None
+    decided_by: Optional[str] = None
+    decided_at: Optional[str] = None

@@ -59,10 +59,10 @@ class TestSubstitutionWorkflow(unittest.TestCase):
         self.db.commit()
 
         self.audit_ledger = AuditLedger(db_path=self.audit_path)
-        self.actor = self.pharmacist
+        self.actor = None
         app.dependency_overrides[get_db] = lambda: self.db
         app.dependency_overrides[get_audit_ledger] = lambda: self.audit_ledger
-        app.dependency_overrides[get_current_user] = lambda: self.actor
+        app.dependency_overrides[get_current_user] = lambda: self.actor or self.pharmacist
         self.client = LocalTestClient(app)
 
     def tearDown(self):
@@ -90,19 +90,31 @@ class TestSubstitutionWorkflow(unittest.TestCase):
         payload.update(overrides)
         return payload
 
-    def _submit(self, **overrides):
-        self.actor = self.pharmacist
-        return self.client.post(
-            "/api/dashboard/pharmacist/substitution-request",
-            json=self._payload(**overrides),
-        )
+    def _submit(self, actor=None, **overrides):
+        if actor is not None:
+            self.actor = actor
+        elif getattr(self, "actor", None) is None:
+            self.actor = self.pharmacist
+        try:
+            return self.client.post(
+                "/api/dashboard/pharmacist/substitution-request",
+                json=self._payload(**overrides),
+            )
+        finally:
+            self.actor = None
 
-    def _decide(self, request_id, decision):
-        self.actor = self.doctor
-        return self.client.post(
-            "/api/dashboard/doctor/substitution-decision",
-            json={"request_id": request_id, "decision": decision},
-        )
+    def _decide(self, request_id, decision, actor=None):
+        if actor is not None:
+            self.actor = actor
+        elif getattr(self, "actor", None) is None:
+            self.actor = self.doctor
+        try:
+            return self.client.post(
+                "/api/dashboard/doctor/substitution-decision",
+                json={"request_id": request_id, "decision": decision},
+            )
+        finally:
+            self.actor = None
 
     def _reopen_database_session(self):
         self.db.close()
@@ -110,6 +122,10 @@ class TestSubstitutionWorkflow(unittest.TestCase):
         self.engine = self._make_engine()
         self.SessionLocal = sessionmaker(bind=self.engine, autoflush=False, autocommit=False)
         self.db = self.SessionLocal()
+        self.pharmacist = self.db.query(User).filter_by(phone_number="test-pharm").one()
+        self.other_pharmacist = self.db.query(User).filter_by(phone_number="test-pharm-2").one()
+        self.doctor = self.db.query(User).filter_by(phone_number="test-doctor").one()
+        self.nurse = self.db.query(User).filter_by(phone_number="test-nurse").one()
 
     def test_submission_persists_and_doctor_dashboard_reads_it_after_reopen(self):
         response = self._submit()
@@ -223,7 +239,7 @@ class TestSubstitutionWorkflow(unittest.TestCase):
         self.pharmacist.role = "Doctor"
         self.actor = self.pharmacist
         self.db.commit()
-        self.assertEqual(self._decide(request_id, "APPROVED").status_code, 403)
+        self.assertEqual(self._decide(request_id, "APPROVED", actor=self.pharmacist).status_code, 403)
 
     def test_missing_authentication_is_rejected(self):
         app.dependency_overrides.pop(get_current_user, None)
