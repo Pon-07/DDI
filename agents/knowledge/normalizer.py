@@ -38,6 +38,22 @@ class DrugNormalizer:
         "valerate",
     }
 
+    # Cation words that can *be* the drug identity when they lead a name
+    # (calcium chloride, potassium chloride, ferrous sulfate, zinc sulfate ...).
+    CATION_WORDS: Set[str] = {
+        "aluminium",
+        "aluminum",
+        "ammonium",
+        "calcium",
+        "ferric",
+        "ferrous",
+        "lithium",
+        "magnesium",
+        "potassium",
+        "sodium",
+        "zinc",
+    }
+
     DEFAULT_DOSAGE_FORMS: Set[str] = {
         "cap",
         "caps",
@@ -149,8 +165,9 @@ class DrugNormalizer:
         text = re.sub(
             r"\b\d+(\.\d+)?\s*(mg|mcg|g|ug|ml|l|iu|meq|%)\b", " ", text
         )
-        # Strip standalone numbers if any (e.g. '0.125', '20')
-        text = re.sub(r"\b\d+(\.\d+)?\b", " ", text)
+        # Strip standalone numbers if any (e.g. '0.125', '20'). Numbers glued to a token by a
+        # hyphen are part of the name (isotopes "iodide i-131", "vitamin b-12") and are kept.
+        text = re.sub(r"(?<![\w-])\d+(\.\d+)?(?![\w-])", " ", text)
 
         # Replace non-alphanumeric separators
         text = re.sub(r"[^\w\s-]", " ", text)
@@ -158,13 +175,33 @@ class DrugNormalizer:
 
         tokens = text.split()
         filtered_tokens = []
+        stripped_salt = False
 
         for token in tokens:
             if self.strip_dosage_forms and token in self.dosage_forms:
                 continue
             if self.strip_salts and token in self.salts:
-                continue
+                # A LEADING cation names the compound ("calcium chloride",
+                # "sodium bicarbonate"); only trailing counter-ions are salt noise
+                # ("phenytoin sodium", "atorvastatin calcium").
+                if filtered_tokens or token not in self.CATION_WORDS:
+                    stripped_salt = True
+                    continue
             filtered_tokens.append(token)
+
+        # If stripping left only bare cations ("calcium acetate" -> "calcium",
+        # "ferrous fumarate" -> "ferrous", "zinc sulfate" -> "zinc"), the result would
+        # merge different compounds. Keep the salt tokens in that case.
+        if (
+            stripped_salt
+            and filtered_tokens
+            and all(t in self.CATION_WORDS for t in filtered_tokens)
+        ):
+            filtered_tokens = [
+                t
+                for t in tokens
+                if not (self.strip_dosage_forms and t in self.dosage_forms)
+            ]
 
         result = " ".join(filtered_tokens).strip()
 

@@ -1,3 +1,4 @@
+import os
 from typing import Optional
 from fastapi import Depends
 
@@ -10,7 +11,11 @@ from engine.event_service import MedicationEventService
 
 _normalizer = DrugNormalizer()
 _knowledge_service = KnowledgeService(normalizer=_normalizer)
-_default_audit_ledger = AuditLedger(db_path="aegis_rx.db")
+# Default is unchanged (./aegis_rx.db). AEGIS_AUDIT_DB_PATH, or failing that AEGIS_DATABASE_URL, redirects
+# the audit ledger so test runs and scratch environments never open the live database at import time.
+_default_audit_ledger = AuditLedger(
+    db_path=os.getenv("AEGIS_AUDIT_DB_PATH") or os.getenv("AEGIS_DATABASE_URL") or "aegis_rx.db"
+)
 _default_explicator = ExplicatorService()
 _default_alternative_ranker = AlternativeRanker()
 _default_resolution_engine = SafetyResolutionEngine(

@@ -13,17 +13,20 @@ from app.routers import (
     findings,
     labs,
     medications,
+    ml_advisory,
     orders,
     patients,
     simulated_orders,
     web_app,
 )
 from app.schemas import SystemStatusResponse
-from database.database import engine, get_db
+from database.database import Base, engine, get_db
 from engine.auth.models import AuthBase
+import models  # noqa: F401
 from models import SubstitutionRequest
 
-# Initialize auth tables idempotently
+# Initialize all application and auth tables idempotently
+Base.metadata.create_all(bind=engine)
 AuthBase.metadata.create_all(bind=engine)
 # Create the new workflow table without altering existing clinical tables.
 SubstitutionRequest.__table__.create(bind=engine, checkfirst=True)
@@ -62,6 +65,7 @@ app.include_router(findings.router)
 app.include_router(simulated_orders.router)
 app.include_router(audit.router)
 app.include_router(demo.router)
+app.include_router(ml_advisory.router)
 
 
 @app.get("/")

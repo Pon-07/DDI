@@ -1,0 +1,49 @@
+{
+  "pack_name": "aegis_validated_ddi",
+  "version": "1.0.0",
+  "description": "Deterministic safety rules for major drug-drug interactions validated against the DDInter dataset in data_validation/ddinter_normalized.json. Specific clinical mechanisms, numeric dosing intervals, and management directives are omitted because this repository does not contain validated evidence for those parameters.",
+  "rules": [
+    {
+      "rule_id": "AEGIS-VAL-001-DOLUTEGRAVIR-ALUMINUM",
+      "rule_type": "drug_interaction",
+      "category": "drug_drug_interaction",
+      "drug_a": "dolutegravir",
+      "drug_b": "aluminum hydroxide",
+      "source": "DDInter",
+      "source_version": "2.0.0",
+      "evidence_id": "DDInter58 | DDInter582",
+      "evidence_text": "DDInter validated major interaction between dolutegravir and aluminum hydroxide (DDInter58 | DDInter582). The source classifies this interaction as Major severity but does not provide clinical mechanism narrative, numeric dosing intervals, or administration timing in this repository; clinical guidance requires external validation. Deterministic safety action is limited to review/hold/monitor; evaluate safer alternative. This is not autonomous prescribing.",
+      "severity": "Major",
+      "action": "review/hold/monitor; evaluate safer alternative",
+      "status": "active"
+    },
+    {
+      "rule_id": "AEGIS-VAL-002-SIMVASTATIN-CLARITHROMYCIN",
+      "rule_type": "drug_interaction",
+      "category": "drug_drug_interaction",
+      "drug_a": "simvastatin",
+      "drug_b": "clarithromycin",
+      "source": "DDInter",
+      "source_version": "2.0.0",
+      "evidence_id": "DDInter1675 | DDInter393",
+      "evidence_text": "DDInter validated major interaction between simvastatin and clarithromycin (DDInter1675 | DDInter393). The source classifies this interaction as Major severity but does not provide pharmacokinetic mechanism details or dose suspension directives in this repository; clinical guidance requires external validation. Deterministic safety action is limited to review/hold/monitor; evaluate safer alternative. This is not autonomous prescribing.",
+      "severity": "Major",
+      "action": "review/hold/monitor; evaluate safer alternative",
+      "status": "active"
+    },
+    {
+      "rule_id": "AEGIS-VAL-003-DIGOXIN-CLARITHROMYCIN",
+      "rule_type": "drug_interaction",
+      "category": "drug_drug_interaction",
+      "drug_a": "digoxin",
+      "drug_b": "clarithromycin",
+      "source": "DDInter",
+      "source_version": "2.0.0",
+      "evidence_id": "DDInter554 | DDInter393",
+      "evidence_text": "DDInter validated major interaction between digoxin and clarithromycin (DDInter554 | DDInter393). The source classifies this interaction as Major severity but does not provide transport inhibition data, therapeutic drug monitoring ranges, or dose adjustment schedules in this repository; clinical guidance requires external validation. Deterministic safety action is limited to review/hold/monitor; evaluate safer alternative. This is not autonomous prescribing.",
+      "severity": "Major",
+      "action": "review/hold/monitor; evaluate safer alternative",
+      "status": "active"
+    }
+  ]
+}

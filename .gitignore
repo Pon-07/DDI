@@ -23,13 +23,34 @@ env/
 data/raw/*
 data/processed/*
 
+# Databases: keep live, backup, and staging SQLite files out of version control.
+# Rebuild derived datasets with python -m data_pipeline.build --no-legacy.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite
+*.sqlite3
+*.contaminated-backup*
+staging/
+data_validation/dailymed/
+
 # Logs
 *.log
 
 # OS
 .DS_Store
 Thumbs.db
+# WHO ATC/DDD index: licensed by WHO, do not redistribute the raw file
+data_validation/WHO_ATC-DDD*.csv
 
-# Database files
-aegis_rx.db
+# Named live database and sidecar files
 aegis_rx.db*
+data_validation/external/
+
+# WHO-derived (ATC) data: redistribution terms unresolved. Kept local only; the application works without these.
+datasets/restricted/
+ml/artifacts/restricted/
+ml/reports/restricted/
+
+data_validation/raw/
