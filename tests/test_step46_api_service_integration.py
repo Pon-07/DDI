@@ -82,6 +82,15 @@ class TestStep46ApiServiceIntegration(unittest.TestCase):
         app.dependency_overrides[get_explicator_service] = lambda: self.explicator
         app.dependency_overrides[get_resolution_engine] = lambda: self.resolution_engine
         app.dependency_overrides[get_event_service] = lambda: self.event_service
+        from engine.auth.dependencies import get_current_user
+        from engine.auth.models import User
+        self.clinician_user = User(
+            id=1,
+            phone_number="+15551234567",
+            full_name="Dr. Test Physician, MD",
+            role="Doctor",
+        )
+        app.dependency_overrides[get_current_user] = lambda: self.clinician_user
 
         self.client = LocalTestClient(app)
 

@@ -12,6 +12,8 @@ from app.schemas import (
     PatientResponse,
 )
 from database.database import get_db
+from engine.auth.dependencies import require_role
+from engine.auth.models import User
 from models import Finding, Lab, Medication, Order, Patient
 
 router = APIRouter(prefix="/patients", tags=["Patients"])
@@ -23,7 +25,7 @@ router = APIRouter(prefix="/patients", tags=["Patients"])
     status_code=status.HTTP_201_CREATED,
     summary="Create a new patient",
 )
-def create_patient(payload: PatientCreate, db: Session = Depends(get_db)):
+def create_patient(payload: PatientCreate, db: Session = Depends(get_db), current_user: User = Depends(require_role(["Doctor", "Administrator"]))):
     existing = db.execute(
         select(Patient).where(Patient.patient_identifier == payload.patient_identifier)
     ).scalar_one_or_none()
@@ -59,7 +61,7 @@ def create_patient(payload: PatientCreate, db: Session = Depends(get_db)):
     response_model=List[PatientResponse],
     summary="Retrieve all patients",
 )
-def list_patients(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+def list_patients(skip: int = 0, limit: int = 100, db: Session = Depends(get_db), current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"]))):
     stmt = select(Patient).offset(skip).limit(limit)
     patients = db.execute(stmt).scalars().all()
     return patients
@@ -70,7 +72,7 @@ def list_patients(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)
     response_model=PatientResponse,
     summary="Retrieve a patient by ID",
 )
-def get_patient(patient_id: int, db: Session = Depends(get_db)):
+def get_patient(patient_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"]))):
     stmt = select(Patient).where(Patient.id == patient_id)
     patient = db.execute(stmt).scalar_one_or_none()
     if not patient:
@@ -86,7 +88,7 @@ def get_patient(patient_id: int, db: Session = Depends(get_db)):
     response_model=PatientContextResponse,
     summary="Retrieve complete patient clinical context",
 )
-def get_patient_context(patient_id: int, db: Session = Depends(get_db)):
+def get_patient_context(patient_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"]))):
     patient = db.execute(
         select(Patient).where(Patient.id == patient_id)
     ).scalar_one_or_none()
@@ -138,7 +140,7 @@ def get_patient_context(patient_id: int, db: Session = Depends(get_db)):
     response_model=List[FindingResponse],
     summary="Retrieve all safety findings for a patient",
 )
-def get_patient_findings(patient_id: int, db: Session = Depends(get_db)):
+def get_patient_findings(patient_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"]))):
     patient = db.execute(
         select(Patient).where(Patient.id == patient_id)
     ).scalar_one_or_none()

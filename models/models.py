@@ -135,6 +135,7 @@ class SubstitutionRequest(Base):
             "order_id",
             unique=True,
             sqlite_where=text("status = 'pending'"),
+            postgresql_where=text("status = 'pending'"),
         ),
     )
 

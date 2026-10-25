@@ -11,10 +11,15 @@ from engine.event_service import MedicationEventService
 
 _normalizer = DrugNormalizer()
 _knowledge_service = KnowledgeService(normalizer=_normalizer)
-# Default is unchanged (./aegis_rx.db). AEGIS_AUDIT_DB_PATH, or failing that AEGIS_DATABASE_URL, redirects
-# the audit ledger so test runs and scratch environments never open the live database at import time.
+# Prefer an explicit audit target, then the same configured database used by the ORM.
+# Tests redirect this target to disposable storage before importing the application.
 _default_audit_ledger = AuditLedger(
-    db_path=os.getenv("AEGIS_AUDIT_DB_PATH") or os.getenv("AEGIS_DATABASE_URL") or "aegis_rx.db"
+    db_path=(
+        os.getenv("AEGIS_AUDIT_DB_PATH")
+        or os.getenv("AEGIS_DATABASE_URL")
+        or os.getenv("DATABASE_URL")
+        or "aegis_rx.db"
+    ),
 )
 _default_explicator = ExplicatorService()
 _default_alternative_ranker = AlternativeRanker()

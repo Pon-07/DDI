@@ -9,289 +9,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, desc, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from agents.audit.ledger import AuditLedger
 from app.dependencies import get_audit_ledger, get_event_service, get_resolution_engine
 from database.database import get_db
-from engine.auth.dependencies import get_current_user, get_optional_user, require_role
+from engine.auth.dependencies import require_role
 from engine.auth.models import User, UserSession
 from engine.auth.providers.factory import get_sms_provider, list_available_providers
 from engine.auth.service import AuthService
-from models import Finding, Lab, Medication, Order, Patient, SafetyRule, SubstitutionRequest
+from models import Event, Finding, Lab, Medication, Order, Patient, SafetyRule, SubstitutionRequest
 
 router = APIRouter(tags=["Role Dashboards & Patient History"])
 
 
 # =========================================================================
-# DETERMINISTIC CLINICAL PATIENT MEDICAL HISTORY REPOSITORY
-# =========================================================================
+# Database-backed patient history and dashboard serializers follow.
 
-DETERMINISTIC_PATIENT_HISTORIES = {
-    "CASE-001": {
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "name": "Sarah Jenkins",
-        "mrn": "MRN-2026-9041",
-        "age": 64,
-        "sex": "Female",
-        "blood_group": "A+",
-        "allergies_summary": "Penicillins (Anaphylaxis)",
-        "conditions_summary": "Non-valvular Atrial Fibrillation, Hypertension, Hyperlipidemia",
-        "last_updated": "2026-10-08 09:30 UTC",
-        "timeline": [
-            {"date": "2026-10-08 08:30 UTC", "event": "Baseline laboratory panel drawn (INR: 3.4, PT: 34.2s)", "actor": "Elena Rostova, RN", "badge": "LAB"},
-            {"date": "2026-10-08 09:15 UTC", "event": "Medication safety assessment completed: CYP2C9 inhibition flagged for Warfarin + Fluconazole", "actor": "Dr. Sarah Lin, MD", "badge": "CLINICAL"},
-            {"date": "2026-10-08 09:20 UTC", "event": "Prescription issued: Warfarin 2.5 mg PO Daily (50% dose reduction)", "actor": "Dr. Sarah Lin, MD", "badge": "PRESCRIPTION"},
-            {"date": "2026-10-08 09:30 UTC", "event": "Pharmacist verified medication availability: Coumadin / Warfarin 2.5 mg available in Bin A-04", "actor": "Marcus Vance, PharmD", "badge": "PHARMACY"},
-            {"date": "2026-10-08 09:35 UTC", "event": "Medication verified & marked ready for dispensing", "actor": "Marcus Vance, PharmD", "badge": "DISPENSING"}
-        ],
-        "medical_conditions": [
-            {"condition": "Non-valvular Atrial Fibrillation", "diagnosis_date": "2021-06-12", "status": "Active", "notes": "CHA2DS2-VASc score 3. Maintained on therapeutic anticoagulation."},
-            {"condition": "Essential Hypertension", "diagnosis_date": "2018-11-04", "status": "Active", "notes": "BP well-controlled on beta-blocker therapy."},
-            {"condition": "Hyperlipidemia", "diagnosis_date": "2019-02-20", "status": "Active", "notes": "Primary prevention with HMG-CoA reductase inhibitor."}
-        ],
-        "medication_history": [
-            {"medication": "Warfarin Sodium (Coumadin)", "strength": "2.5 mg", "route": "Oral", "start_date": "2026-10-07", "end_date": "Ongoing", "status": "Active (Adjusted)", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Metoprolol Tartrate", "strength": "25 mg", "route": "Oral", "start_date": "2021-06-15", "end_date": "Ongoing", "status": "Active", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Atorvastatin Calcium", "strength": "20 mg", "route": "Oral", "start_date": "2019-02-22", "end_date": "Ongoing", "status": "Active", "prescribing_doctor": "Dr. David Sterling, MD"},
-            {"medication": "Fluconazole (Diflucan)", "strength": "100 mg", "route": "Oral", "start_date": "2026-10-07", "end_date": "2026-10-21", "status": "Active (14-day course)", "prescribing_doctor": "Dr. Sarah Lin, MD"}
-        ],
-        "allergies": [
-            {"allergen": "Penicillin V / Amoxicillin", "reaction": "Anaphylaxis & Facial Angioedema", "severity": "Severe (Critical)", "recorded_date": "2024-03-15"}
-        ],
-        "laboratory_history": [
-            {"date": "2026-10-08 08:30 UTC", "test": "Prothrombin Time (INR)", "result": "3.4", "unit": "Ratio", "reference_range": "0.8 - 1.2", "status": "High (Critical)", "source_report_id": "LAB-2026-0001", "source_doc": "data/lab_reports/LAB-2026-0001.json"},
-            {"date": "2026-10-08 08:30 UTC", "test": "Prothrombin Time (PT)", "result": "34.2", "unit": "seconds", "reference_range": "11.0 - 13.5", "status": "High", "source_report_id": "LAB-2026-0001", "source_doc": "data/lab_reports/LAB-2026-0001.json"},
-            {"date": "2026-10-08 08:30 UTC", "test": "Serum Creatinine", "result": "0.9", "unit": "mg/dL", "reference_range": "0.6 - 1.2", "status": "Normal", "source_report_id": "LAB-2026-0001", "source_doc": "data/lab_reports/LAB-2026-0001.json"},
-            {"date": "2026-10-08 08:30 UTC", "test": "ALT (SGPT)", "result": "28", "unit": "U/L", "reference_range": "7 - 56", "status": "Normal", "source_report_id": "LAB-2026-0001", "source_doc": "data/lab_reports/LAB-2026-0001.json"}
-        ],
-        "clinical_assessments": [
-            {"date": "2026-10-08 09:15 UTC", "assessment": "Warfarin + Fluconazole CYP2C9 Metabolic Inhibition", "risk_level": "Critical Risk", "recommendation": "Warfarin maintenance dose reduction to 2.5 mg PO Daily OR convert to Micafungin 100 mg IV Daily", "doctor": "Dr. Sarah Lin, MD (Cardiology)"}
-        ],
-        "pharmacy_events": [
-            {"date": "2026-10-08 09:30 UTC", "medication": "Warfarin (Coumadin) 2.5 mg", "availability": "Available (420 Tabs, Bin A-04)", "substitution_request": "None Required", "doctor_verification": "Verified", "dispensing_status": "Ready for Dispensing"}
-        ],
-        "audit_events": [
-            {"timestamp": "2026-10-08 09:35:10 UTC", "user_role": "Marcus Vance, PharmD (Pharmacist)", "action": "Prescription Verified & Marked Ready for Dispensing", "event_type": "PHARMACIST_PRESCRIPTION_VERIFIED", "audit_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
-            {"timestamp": "2026-10-08 09:20:00 UTC", "user_role": "Dr. Sarah Lin, MD (Doctor)", "action": "Prescription Authorized for Warfarin 2.5 mg PO Daily", "event_type": "MEDICATION_PRESCRIBED", "audit_hash": "4a7d1ed414474e4033ac29ccb8653d9b002c7709b1f28b4c0bc89452b467e2a9"}
-        ]
-    },
-    "CASE-002": {
-        "case_id": "CASE-002",
-        "patient_identifier": "DEMO-PT-002",
-        "name": "Robert Chen",
-        "mrn": "MRN-2026-8812",
-        "age": 72,
-        "sex": "Male",
-        "blood_group": "B+",
-        "allergies_summary": "Sulfa drugs (Sulfamethoxazole - Rash)",
-        "conditions_summary": "Acute Deep Vein Thrombosis, Stage 3B Chronic Kidney Disease, Type 2 Diabetes",
-        "last_updated": "2026-10-08 11:30 UTC",
-        "timeline": [
-            {"date": "2026-10-08 07:45 UTC", "event": "Inpatient renal function panel released (Serum Creatinine: 2.4 mg/dL, eGFR: 28 mL/min)", "actor": "Elena Rostova, RN", "badge": "LAB"},
-            {"date": "2026-10-08 08:20 UTC", "event": "Medication safety assessment completed: LMWH Anti-Xa accumulation risk in declining renal clearance", "actor": "Dr. Sarah Lin, MD", "badge": "CLINICAL"},
-            {"date": "2026-10-08 11:00 UTC", "event": "Doctor issued prescription for Enoxaparin Sodium (Lovenox) 80 mg SC Daily", "actor": "Dr. Sarah Lin, MD", "badge": "PRESCRIPTION"},
-            {"date": "2026-10-08 11:15 UTC", "event": "Pharmacist checked availability: Prescribed brand Lovenox 80 mg is UNAVAILABLE (Out-of-Stock)", "actor": "Marcus Vance, PharmD", "badge": "PHARMACY"},
-            {"date": "2026-10-08 11:20 UTC", "event": "Pharmacist identified configured brand alternative (Clexane 80 mg) and submitted Substitution Request to Doctor", "actor": "Marcus Vance, PharmD", "badge": "SUBSTITUTION"},
-            {"date": "2026-10-08 11:25 UTC", "event": "Doctor reviewed and approved brand substitution request for Clexane 80 mg / 0.8 mL", "actor": "Dr. Sarah Lin, MD", "badge": "APPROVAL"},
-            {"date": "2026-10-08 11:30 UTC", "event": "Pharmacist verified Doctor approval and marked Clexane 80 mg ready for dispensing", "actor": "Marcus Vance, PharmD", "badge": "DISPENSING"}
-        ],
-        "medical_conditions": [
-            {"condition": "Acute Deep Vein Thrombosis (Left Lower Extremity)", "diagnosis_date": "2026-10-05", "status": "Active", "notes": "Confirmed on duplex ultrasound; requires therapeutic anticoagulation."},
-            {"condition": "Stage 3B Chronic Kidney Disease", "diagnosis_date": "2022-04-18", "status": "Active", "notes": "Baseline creatinine 1.8 mg/dL with acute rise to 2.4 mg/dL."},
-            {"condition": "Type 2 Diabetes Mellitus w/ Neuropathy", "diagnosis_date": "2016-09-12", "status": "Active", "notes": "Managed with glargine insulin and dietary controls."}
-        ],
-        "medication_history": [
-            {"medication": "Enoxaparin Sodium (Lovenox)", "strength": "80 mg / 0.8 mL", "route": "Subcutaneous", "start_date": "2026-10-06", "end_date": "2026-10-08", "status": "Substituted (Unavailable)", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Clexane (Enoxaparin Sodium)", "strength": "80 mg / 0.8 mL", "route": "Subcutaneous", "start_date": "2026-10-08", "end_date": "Ongoing", "status": "Active (Doctor Approved Substitution)", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Glargine Insulin (Lantus)", "strength": "20 units", "route": "Subcutaneous", "start_date": "2020-01-10", "end_date": "Ongoing", "status": "Active", "prescribing_doctor": "Dr. Alan Mercer, MD"}
-        ],
-        "allergies": [
-            {"allergen": "Sulfamethoxazole / Trimethoprim (Bactrim)", "reaction": "Maculopapular pruritic eruption", "severity": "Moderate", "recorded_date": "2023-08-10"}
-        ],
-        "laboratory_history": [
-            {"date": "2026-10-08 07:45 UTC", "test": "Serum Creatinine", "result": "2.4", "unit": "mg/dL", "reference_range": "0.7 - 1.3", "status": "High (Critical)", "source_report_id": "LAB-2026-0002", "source_doc": "data/lab_reports/LAB-2026-0002.json"},
-            {"date": "2026-10-08 07:45 UTC", "test": "eGFR (CKD-EPI)", "result": "28", "unit": "mL/min/1.73m²", "reference_range": "> 60", "status": "Low (Impaired)", "source_report_id": "LAB-2026-0002", "source_doc": "data/lab_reports/LAB-2026-0002.json"},
-            {"date": "2026-10-08 07:45 UTC", "test": "Blood Urea Nitrogen (BUN)", "result": "38", "unit": "mg/dL", "reference_range": "7 - 20", "status": "High", "source_report_id": "LAB-2026-0002", "source_doc": "data/lab_reports/LAB-2026-0002.json"},
-            {"date": "2026-10-08 07:45 UTC", "test": "Serum Potassium", "result": "4.8", "unit": "mEq/L", "reference_range": "3.5 - 5.0", "status": "Normal", "source_report_id": "LAB-2026-0002", "source_doc": "data/lab_reports/LAB-2026-0002.json"}
-        ],
-        "clinical_assessments": [
-            {"date": "2026-10-08 08:20 UTC", "assessment": "Enoxaparin Clearance in Acute Renal Impairment", "risk_level": "Critical Risk", "recommendation": "Renal dose adjustment to 30 mg SC Daily OR substitute Unfractionated Heparin 5,000 U IV", "doctor": "Dr. Sarah Lin, MD (Nephrology / ID)"}
-        ],
-        "pharmacy_events": [
-            {"date": "2026-10-08 11:15 UTC", "medication": "Lovenox 80 mg / 0.8 mL", "availability": "UNAVAILABLE (Stock: 0)", "substitution_request": "Suggested Clexane 80 mg (Bin D-12)", "doctor_verification": "Approved by Dr. Sarah Lin, MD", "dispensing_status": "Ready for Dispensing"}
-        ],
-        "audit_events": [
-            {"timestamp": "2026-10-08 11:30:00 UTC", "user_role": "Marcus Vance, PharmD (Pharmacist)", "action": "Alternative Brand Marked Ready for Dispensing: Clexane 80 mg", "event_type": "MEDICATION_MARKED_READY_FOR_DISPENSING", "audit_hash": "b2f6c91a7834bcde1029384756abcdef1234567890abcdef1234567890abcdef"},
-            {"timestamp": "2026-10-08 11:25:00 UTC", "user_role": "Dr. Sarah Lin, MD (Doctor)", "action": "Approved Pharmacy Brand Substitution: Lovenox -> Clexane 80 mg", "event_type": "DOCTOR_SUBSTITUTION_APPROVED", "audit_hash": "a1c7d8e9f0123456789abcdef0123456789abcdef0123456789abcdef0123456"},
-            {"timestamp": "2026-10-08 11:20:00 UTC", "user_role": "Marcus Vance, PharmD (Pharmacist)", "action": "Substitution Request Dispatched: Lovenox (Unavailable) -> Clexane (Available)", "event_type": "PHARMACY_SUBSTITUTION_REQUESTED", "audit_hash": "7f8e9d0a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e"}
-        ]
-    },
-    "CASE-003": {
-        "case_id": "CASE-003",
-        "patient_identifier": "DEMO-PT-003",
-        "name": "Elena Rostova",
-        "mrn": "MRN-2026-7734",
-        "age": 58,
-        "sex": "Female",
-        "blood_group": "O+",
-        "allergies_summary": "Codeine (Severe nausea & vertigo)",
-        "conditions_summary": "Essential Hypertension, Mild Hyperkalemia, Osteoarthritis",
-        "last_updated": "2026-10-08 14:10 UTC",
-        "timeline": [
-            {"date": "2026-10-08 09:00 UTC", "event": "Electrolyte panel drawn showing Serum Potassium 5.3 mEq/L", "actor": "Elena Rostova, RN", "badge": "LAB"},
-            {"date": "2026-10-08 09:40 UTC", "event": "Medication safety assessment completed: Dual ACE-Inhibitor toxicity flagged (Lisinopril + Enalapril)", "actor": "Dr. Sarah Lin, MD", "badge": "CLINICAL"},
-            {"date": "2026-10-08 10:00 UTC", "event": "Doctor deprescribed duplicate Enalapril 10 mg; maintained Lisinopril 20 mg PO Daily", "actor": "Dr. Sarah Lin, MD", "badge": "PRESCRIPTION"},
-            {"date": "2026-10-08 14:00 UTC", "event": "Pharmacist verified Prinivil / Lisinopril 20 mg stock available in Bin E-04 (600 Tablets)", "actor": "Marcus Vance, PharmD", "badge": "PHARMACY"},
-            {"date": "2026-10-08 14:05 UTC", "event": "Medication marked ready for dispensing", "actor": "Marcus Vance, PharmD", "badge": "DISPENSING"}
-        ],
-        "medical_conditions": [
-            {"condition": "Essential Hypertension Stage II", "diagnosis_date": "2017-03-10", "status": "Active", "notes": "Dual ACE inhibitor therapy deprescribed to prevent hypotension/hyperkalemia."},
-            {"condition": "Mild Hyperkalemia", "diagnosis_date": "2026-10-07", "status": "Active", "notes": "Serum K+ 5.3–5.6 mEq/L; monitoring electrolytes."},
-            {"condition": "Osteoarthritis (Bilateral Knees)", "diagnosis_date": "2020-05-14", "status": "Active", "notes": "Symptomatic relief with acetaminophen PRN."}
-        ],
-        "medication_history": [
-            {"medication": "Lisinopril (Prinivil)", "strength": "20 mg", "route": "Oral", "start_date": "2026-10-07", "end_date": "Ongoing", "status": "Active Maintenance", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Enalapril Maleate (Vasotec)", "strength": "10 mg", "route": "Oral", "start_date": "2026-10-01", "end_date": "2026-10-08", "status": "Discontinued (Deprescribed Duplicate)", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Acetaminophen", "strength": "500 mg", "route": "Oral", "start_date": "2020-05-18", "end_date": "Ongoing", "status": "Active PRN", "prescribing_doctor": "Dr. Alan Mercer, MD"}
-        ],
-        "allergies": [
-            {"allergen": "Codeine Phosphate", "reaction": "Nausea, intractable vomiting & severe vertigo", "severity": "Mild", "recorded_date": "2021-11-03"}
-        ],
-        "laboratory_history": [
-            {"date": "2026-10-08 09:00 UTC", "test": "Serum Potassium", "result": "5.3", "unit": "mEq/L", "reference_range": "3.5 - 5.0", "status": "High", "source_report_id": "LAB-2026-0003", "source_doc": "data/lab_reports/LAB-2026-0003.json"},
-            {"date": "2026-10-08 09:00 UTC", "test": "Serum Sodium", "result": "138", "unit": "mEq/L", "reference_range": "135 - 145", "status": "Normal", "source_report_id": "LAB-2026-0003", "source_doc": "data/lab_reports/LAB-2026-0003.json"},
-            {"date": "2026-10-08 09:00 UTC", "test": "Blood Urea Nitrogen", "result": "22", "unit": "mg/dL", "reference_range": "7 - 20", "status": "High", "source_report_id": "LAB-2026-0003", "source_doc": "data/lab_reports/LAB-2026-0003.json"},
-            {"date": "2026-10-08 09:00 UTC", "test": "Serum Creatinine", "result": "1.1", "unit": "mg/dL", "reference_range": "0.6 - 1.2", "status": "Normal", "source_report_id": "LAB-2026-0003", "source_doc": "data/lab_reports/LAB-2026-0003.json"}
-        ],
-        "clinical_assessments": [
-            {"date": "2026-10-08 09:40 UTC", "assessment": "Dual ACE-Inhibitor Duplicate Toxicity & Hyperkalemia", "risk_level": "High Risk", "recommendation": "Deprescribe Enalapril 10 mg PO; maintain Lisinopril 20 mg monotherapy", "doctor": "Dr. Sarah Lin, MD (Internal Medicine)"}
-        ],
-        "pharmacy_events": [
-            {"date": "2026-10-08 14:00 UTC", "medication": "Lisinopril (Prinivil) 20 mg", "availability": "Available (600 Tabs, Bin E-04)", "substitution_request": "None Required", "doctor_verification": "Verified", "dispensing_status": "Ready for Dispensing"}
-        ],
-        "audit_events": [
-            {"timestamp": "2026-10-08 14:05:00 UTC", "user_role": "Marcus Vance, PharmD (Pharmacist)", "action": "Prescription Verified & Approved: Lisinopril 20 mg PO Daily", "event_type": "PHARMACIST_PRESCRIPTION_VERIFIED", "audit_hash": "c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f012345678"}
-        ]
-    },
-    "CASE-004": {
-        "case_id": "CASE-004",
-        "patient_identifier": "DEMO-PT-004",
-        "name": "Arthur Pendelton",
-        "mrn": "MRN-2026-6629",
-        "age": 79,
-        "sex": "Male",
-        "blood_group": "AB-",
-        "allergies_summary": "None documented",
-        "conditions_summary": "Congestive Heart Failure Stage C, Permanent Atrial Fibrillation, Coronary Artery Disease",
-        "last_updated": "2026-10-08 16:00 UTC",
-        "timeline": [
-            {"date": "2026-10-08 10:15 UTC", "event": "Therapeutic drug monitoring panel released: Serum Digoxin Level 2.1 ng/mL (Toxic)", "actor": "Elena Rostova, RN", "badge": "LAB"},
-            {"date": "2026-10-08 15:45 UTC", "event": "Medication safety assessment completed: Digoxin + Amiodarone P-glycoprotein interaction flagged", "actor": "Dr. Sarah Lin, MD", "badge": "CLINICAL"},
-            {"date": "2026-10-08 15:50 UTC", "event": "Doctor reduced Digoxin dose to 0.125 mg PO Daily and scheduled TDM for Day 7", "actor": "Dr. Sarah Lin, MD", "badge": "PRESCRIPTION"},
-            {"date": "2026-10-08 16:00 UTC", "event": "Pharmacist verified Lanoxin / Digoxin 0.125 mg stock available in Bin F-06 (180 Tablets)", "actor": "Marcus Vance, PharmD", "badge": "PHARMACY"},
-            {"date": "2026-10-08 16:05 UTC", "event": "Medication marked ready for dispensing", "actor": "Marcus Vance, PharmD", "badge": "DISPENSING"}
-        ],
-        "medical_conditions": [
-            {"condition": "Congestive Heart Failure Stage C (LVEF 35%)", "diagnosis_date": "2019-08-11", "status": "Active", "notes": "Maintained on digoxin, loop diuretic and guideline-directed therapy."},
-            {"condition": "Permanent Atrial Fibrillation", "diagnosis_date": "2020-01-22", "status": "Active", "notes": "Rate controlled with amiodarone + low-dose digoxin."}
-        ],
-        "medication_history": [
-            {"medication": "Digoxin (Lanoxin)", "strength": "0.125 mg", "route": "Oral", "start_date": "2026-10-07", "end_date": "Ongoing", "status": "Active (Dose Reduced)", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Amiodarone HCl (Pacerone)", "strength": "200 mg", "route": "Oral", "start_date": "2024-02-10", "end_date": "Ongoing", "status": "Active", "prescribing_doctor": "Dr. Sarah Lin, MD"},
-            {"medication": "Furosemide (Lasix)", "strength": "40 mg", "route": "Oral", "start_date": "2019-08-15", "end_date": "Ongoing", "status": "Active", "prescribing_doctor": "Dr. Sarah Lin, MD"}
-        ],
-        "allergies": [],
-        "laboratory_history": [
-            {"date": "2026-10-08 10:15 UTC", "test": "Serum Digoxin Level", "result": "2.1", "unit": "ng/mL", "reference_range": "0.5 - 0.9", "status": "High (Toxic Range)", "source_report_id": "LAB-2026-0004", "source_doc": "data/lab_reports/LAB-2026-0004.json"},
-            {"date": "2026-10-08 10:15 UTC", "test": "Serum Potassium", "result": "4.2", "unit": "mEq/L", "reference_range": "3.5 - 5.0", "status": "Normal", "source_report_id": "LAB-2026-0004", "source_doc": "data/lab_reports/LAB-2026-0004.json"},
-            {"date": "2026-10-08 10:15 UTC", "test": "Serum Magnesium", "result": "2.0", "unit": "mg/dL", "reference_range": "1.7 - 2.2", "status": "Normal", "source_report_id": "LAB-2026-0004", "source_doc": "data/lab_reports/LAB-2026-0004.json"}
-        ],
-        "clinical_assessments": [
-            {"date": "2026-10-08 15:45 UTC", "assessment": "Digoxin + Amiodarone P-glycoprotein Efflux Inhibition", "risk_level": "Critical Risk", "recommendation": "Reduce Digoxin dose to 0.125 mg PO Daily; repeat serum level TDM at Day 7", "doctor": "Dr. Sarah Lin, MD (Cardiology)"}
-        ],
-        "pharmacy_events": [
-            {"date": "2026-10-08 16:00 UTC", "medication": "Digoxin (Lanoxin) 0.125 mg", "availability": "Available (180 Tabs, Bin F-06)", "substitution_request": "None Required", "doctor_verification": "Verified", "dispensing_status": "Ready for Dispensing"}
-        ],
-        "audit_events": [
-            {"timestamp": "2026-10-08 16:05:00 UTC", "user_role": "Marcus Vance, PharmD (Pharmacist)", "action": "Prescription Verified & Approved: Digoxin 0.125 mg PO Daily", "event_type": "PHARMACIST_PRESCRIPTION_VERIFIED", "audit_hash": "d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0123456789a"}
-        ]
-    }
-}
-
-
-def _get_patient_medical_history(identifier: str) -> Dict[str, Any]:
-    """Retrieves deterministic, complete patient medical history by Case ID, DEMO ID, or MRN."""
-    clean = str(identifier).strip().upper()
-    
-    # Direct match in fixed cases
-    if clean in DETERMINISTIC_PATIENT_HISTORIES:
-        data = dict(DETERMINISTIC_PATIENT_HISTORIES[clean])
-        data["patient_name"] = data["name"]
-        return data
-    for k, v in DETERMINISTIC_PATIENT_HISTORIES.items():
-        if v["patient_identifier"].upper() == clean or v["name"].upper() == clean or clean in v["mrn"].upper():
-            data = dict(v)
-            data["patient_name"] = data["name"]
-            return data
-
-    # Fallback for synthetic patients (PT-001 to PT-265)
-    pt_num = 1
-    if clean.startswith("PT-") or clean.startswith("DEMO-PT-"):
-        try:
-            pt_num = int(clean.split("-")[-1])
-        except Exception:
-            pt_num = 1
-
-    first_names = ["Sarah", "Robert", "Elena", "Arthur", "David", "Emily", "Michael", "Karen", "James", "Jennifer"]
-    last_names = ["Jenkins", "Chen", "Rostova", "Pendelton", "Sterling", "Zhang", "Mercer", "Davis", "Vance", "Taylor"]
-    fn = first_names[pt_num % len(first_names)]
-    ln = last_names[(pt_num * 3) % len(last_names)]
-    full_name = f"{fn} {ln}"
-
-    return {
-        "case_id": f"CASE-{pt_num:03d}",
-        "patient_identifier": f"PT-{pt_num:03d}",
-        "name": full_name,
-        "mrn": f"MRN-2026-{8000 + pt_num}",
-        "age": 45 + (pt_num % 40),
-        "sex": "Female" if pt_num % 2 == 1 else "Male",
-        "blood_group": ["A+", "B+", "O+", "AB+", "A-", "O-"][pt_num % 6],
-        "allergies_summary": "Penicillins" if pt_num % 3 == 0 else "None documented",
-        "conditions_summary": "Cardiovascular Disease & Hypertension",
-        "last_updated": "2026-10-08 08:00 UTC",
-        "timeline": [
-            {"date": "2026-10-08 08:00 UTC", "event": "Inpatient admission & clinical chart review", "actor": "Dr. Sarah Lin, MD", "badge": "CLINICAL"},
-            {"date": "2026-10-08 08:30 UTC", "event": "Laboratory evaluation completed", "actor": "Elena Rostova, RN", "badge": "LAB"},
-            {"date": "2026-10-08 09:00 UTC", "event": "Prescription received in pharmacy queue", "actor": "Marcus Vance, PharmD", "badge": "PHARMACY"}
-        ],
-        "medical_conditions": [
-            {"condition": "Essential Hypertension", "diagnosis_date": "2020-01-15", "status": "Active", "notes": "Therapeutic maintenance regimen."},
-            {"condition": "Hypercholesterolemia", "diagnosis_date": "2021-05-10", "status": "Active", "notes": "Lipid lowering therapy."}
-        ],
-        "medication_history": [
-            {"medication": "Amlodipine Besylate", "strength": "5 mg", "route": "Oral", "start_date": "2021-05-15", "end_date": "Ongoing", "status": "Active", "prescribing_doctor": "Dr. Sarah Lin, MD"}
-        ],
-        "allergies": [
-            {"allergen": "Penicillin V", "reaction": "Cutaneous rash", "severity": "Moderate", "recorded_date": "2023-01-10"}
-        ] if pt_num % 3 == 0 else [],
-        "laboratory_history": [
-            {"date": "2026-10-08 08:30 UTC", "test": "Serum Creatinine", "result": "1.0", "unit": "mg/dL", "reference_range": "0.6 - 1.2", "status": "Normal", "source_report_id": "LAB-GEN-01", "source_doc": "data/lab_reports/LAB-2026-0001.json"}
-        ],
-        "clinical_assessments": [
-            {"date": "2026-10-08 08:00 UTC", "assessment": "Routine Clinical Medication Review", "risk_level": "Low Risk", "recommendation": "Maintain baseline therapeutic regimen", "doctor": "Dr. Sarah Lin, MD"}
-        ],
-        "pharmacy_events": [
-            {"date": "2026-10-08 09:00 UTC", "medication": "Amlodipine Besylate 5 mg", "availability": "Available", "substitution_request": "None Required", "doctor_verification": "Verified", "dispensing_status": "Ready for Dispensing"}
-        ],
-        "audit_events": [
-            {"timestamp": "2026-10-08 08:00:00 UTC", "user_role": "Dr. Sarah Lin, MD (Doctor)", "action": "Patient Chart Evaluated", "event_type": "CLINICAL_EVENT_INGESTED", "audit_hash": "a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f01234"}
-        ]
-    }
-
-
-# =========================================================================
 # REQUEST & RESPONSE PYDANTIC SCHEMAS
 # =========================================================================
 
@@ -309,6 +43,10 @@ class DoctorSubstitutionDecisionRequest(BaseModel):
     request_id: int
     decision: Literal["APPROVED", "REJECTED", "CLARIFICATION_REQUIRED"]
     doctor_notes: Optional[str] = Field(None, max_length=2000)
+
+
+def _normalize_medication_name(value: Optional[str]) -> str:
+    return "".join(character.lower() for character in (value or "") if character.isalnum())
 
 
 def _substitution_request_response(db: Session, request: SubstitutionRequest) -> Dict[str, Any]:
@@ -348,67 +86,6 @@ def _substitution_request_response(db: Session, request: SubstitutionRequest) ->
         "decided_by": request.decided_by_name,
         "decided_at": request.decided_at.isoformat() if request.decided_at else None,
     }
-
-
-def _normalize_medication_name(value: Optional[str]) -> str:
-    return "".join(character.lower() for character in (value or "") if character.isalnum())
-
-
-def _find_persisted_queue_order(db: Session, item: Dict[str, Any]):
-    """Link a demo queue row only when one unambiguous, active DB prescription matches it."""
-    patient = db.execute(
-        select(Patient).where(Patient.patient_identifier == item.get("patient_identifier"))
-    ).scalar_one_or_none()
-    if patient is None:
-        return None, None, None
-
-    allowed_order_statuses = {"", "active", "pending", "ordered"}
-    allowed_medication_statuses = {"", "active", "pending", "ordered"}
-    generic_key = _normalize_medication_name(item.get("generic_name"))
-    prescribed_key = _normalize_medication_name(item.get("prescribed_medicine"))
-    expected_dose = _normalize_medication_name(item.get("strength"))
-    matches = []
-
-    orders = db.execute(
-        select(Order).where(Order.patient_id == patient.id).order_by(desc(Order.ordered_at), desc(Order.id))
-    ).scalars().all()
-    for order in orders:
-        if (order.status or "").strip().lower() not in allowed_order_statuses or order.medication_id is None:
-            continue
-        medication = db.get(Medication, order.medication_id)
-        if medication is None or medication.patient_id != patient.id:
-            continue
-        if (medication.status or "").strip().lower() not in allowed_medication_statuses:
-            continue
-
-        medication_key = _normalize_medication_name(medication.drug_name)
-        order_key = _normalize_medication_name(order.drug_name)
-        names_match = any(
-            candidate and (candidate == reference or candidate in reference or reference in candidate)
-            for candidate in (medication_key, order_key)
-            for reference in (generic_key, prescribed_key)
-        )
-        if not names_match:
-            continue
-
-        actual_dose = _normalize_medication_name(f"{order.dose or ''}{order.dose_unit or ''}")
-        if expected_dose and actual_dose and expected_dose not in actual_dose and actual_dose not in expected_dose:
-            continue
-        matches.append((patient, order, medication))
-
-    # Never guess which prescription a pharmacist meant when a patient has multiple matches.
-    return matches[0] if len(matches) == 1 else (None, None, None)
-
-
-class PharmacistDispenseRequest(BaseModel):
-    case_id: str
-    patient_id: Optional[int] = None
-    patient_name: Optional[str] = None
-    medication: str
-    brand_name: Optional[str] = None
-    strength: str
-    formulation: str
-    dispense_notes: Optional[str] = None
 
 
 class PharmacistVerificationRequest(BaseModel):
@@ -464,7 +141,7 @@ def get_doctor_dashboard_data(
             "patient_identifier": p.patient_identifier,
             "name": p.name,
             "sex": p.sex,
-            "allergies": p.allergy_information or "None documented",
+            "allergies": p.allergy_information or "Not recorded",
             "active_medications": [{"name": m.drug_name, "dose": f"{m.dose or ''} {m.dose_unit or ''}".strip(), "frequency": m.frequency} for m in meds],
             "recent_labs": [{"test": l.test_name, "value": l.value, "unit": l.unit or ""} for l in labs[:3]],
             "active_findings_count": len(findings),
@@ -525,9 +202,9 @@ def get_doctor_dashboard_data(
             "title": f.title,
             "description": f.description,
             "action": f.action,
-            "source": trace_dict.get("source") or "Deterministic Safety Engine",
-            "evidence_id": trace_dict.get("evidence_id") or "AEGIS-EV-001",
-            "source_version": trace_dict.get("source_version") or "1.0.0",
+            "source": trace_dict.get("source"),
+            "evidence_id": trace_dict.get("evidence_id"),
+            "source_version": trace_dict.get("source_version"),
             "inputs": inputs_dict,
             "created_at": f.created_at.strftime("%Y-%m-%d %H:%M:%S") if f.created_at else None,
         })
@@ -566,390 +243,93 @@ def get_doctor_dashboard_data(
 # NURSE DASHBOARD: MEDICATION ADMINISTRATION RECORD (MAR) & VITALS INGESTION
 # =========================================================================
 
-DETERMINISTIC_NURSE_MAR = [
-    {
-        "mar_id": "MAR-001",
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "patient_name": "Sarah Jenkins",
-        "medication": "Warfarin Sodium",
-        "dose": "2.5 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "08:00",
-        "status": "DUE",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Target INR 2.0–3.0. Verify morning lab before administration.",
-        "clinical_alert": "Active DDI flagged: Warfarin + Fluconazole CYP2C9 inhibition. Morning INR elevated at 3.4.",
-        "requires_escalation": True,
-        "recorded_by": None,
-        "recorded_at": None,
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-002",
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "patient_name": "Sarah Jenkins",
-        "medication": "Fluconazole",
-        "dose": "200 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "20:00",
-        "status": "HELD",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Safety Hold: High bleeding hazard from CYP2C9 inhibition.",
-        "clinical_alert": "Medication safety assessment requires medication hold/review.",
-        "requires_escalation": True,
-        "recorded_by": "Elena Rostova, RN",
-        "recorded_at": "08 Oct 2026 07:30 UTC",
-        "hold_reason": "Clinical safety rule AEGIS-DEMO-001 triggered: Drug interaction with Warfarin.",
-    },
-    {
-        "mar_id": "MAR-003",
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "patient_name": "Sarah Jenkins",
-        "medication": "Atorvastatin Calcium",
-        "dose": "20 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "21:00",
-        "status": "ADMINISTERED",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Administered with evening meal. Patient tolerated well.",
-        "clinical_alert": None,
-        "requires_escalation": False,
-        "recorded_by": "Elena Rostova, RN",
-        "recorded_at": "07 Oct 2026 21:05 UTC",
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-004",
-        "case_id": "CASE-002",
-        "patient_identifier": "DEMO-PT-002",
-        "patient_name": "Robert Chen",
-        "medication": "Enoxaparin Sodium",
-        "dose": "30 mg",
-        "route": "Subcutaneous (SC)",
-        "scheduled_time": "09:00",
-        "status": "DUE",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Renal-adjusted dose (CrCl 24 mL/min). Rotate abdominal injection sites.",
-        "clinical_alert": "Renal safety alert: Serum creatinine 2.4 mg/dL requires dosage verification.",
-        "requires_escalation": True,
-        "recorded_by": None,
-        "recorded_at": None,
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-005",
-        "case_id": "CASE-002",
-        "patient_identifier": "DEMO-PT-002",
-        "patient_name": "Robert Chen",
-        "medication": "Pantoprazole Sodium",
-        "dose": "40 mg",
-        "route": "Intravenous (IV)",
-        "scheduled_time": "07:30",
-        "status": "ADMINISTERED",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Slow IV push over 2 minutes via peripheral line.",
-        "clinical_alert": None,
-        "requires_escalation": False,
-        "recorded_by": "Elena Rostova, RN",
-        "recorded_at": "08 Oct 2026 07:35 UTC",
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-006",
-        "case_id": "CASE-002",
-        "patient_identifier": "DEMO-PT-002",
-        "patient_name": "Robert Chen",
-        "medication": "Furosemide",
-        "dose": "20 mg",
-        "route": "Intravenous (IV)",
-        "scheduled_time": "14:00",
-        "status": "PENDING",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Monitor strict fluid balance and urine output post-dose.",
-        "clinical_alert": None,
-        "requires_escalation": False,
-        "recorded_by": None,
-        "recorded_at": None,
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-007",
-        "case_id": "CASE-003",
-        "patient_identifier": "DEMO-PT-003",
-        "patient_name": "Elena Rostova",
-        "medication": "Lisinopril",
-        "dose": "10 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "08:00",
-        "status": "ADMINISTERED",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Blood pressure confirmed at 142/88 mmHg prior to administration.",
-        "clinical_alert": None,
-        "requires_escalation": False,
-        "recorded_by": "Elena Rostova, RN",
-        "recorded_at": "08 Oct 2026 08:05 UTC",
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-008",
-        "case_id": "CASE-003",
-        "patient_identifier": "DEMO-PT-003",
-        "patient_name": "Elena Rostova",
-        "medication": "Enalapril Maleate",
-        "dose": "10 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "12:00",
-        "status": "HELD",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Safety Hold: Duplicate ACE-inhibitor therapy alert flagged by safety engine.",
-        "clinical_alert": "Therapeutic Duplication: Lisinopril + Enalapril dual ACE-I therapy flagged.",
-        "requires_escalation": True,
-        "recorded_by": "Elena Rostova, RN",
-        "recorded_at": "08 Oct 2026 07:45 UTC",
-        "hold_reason": "Rule AEGIS-DEMO-003: Duplicate ACE-I therapy elevates hyperkalemia hazard.",
-    },
-    {
-        "mar_id": "MAR-009",
-        "case_id": "CASE-003",
-        "patient_identifier": "DEMO-PT-003",
-        "patient_name": "Elena Rostova",
-        "medication": "Amlodipine Besylate",
-        "dose": "5 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "09:00",
-        "status": "DUE",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Daily calcium channel blocker maintenance.",
-        "clinical_alert": None,
-        "requires_escalation": False,
-        "recorded_by": None,
-        "recorded_at": None,
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-010",
-        "case_id": "CASE-004",
-        "patient_identifier": "DEMO-PT-004",
-        "patient_name": "Arthur Pendelton",
-        "medication": "Digoxin",
-        "dose": "0.125 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "10:00",
-        "status": "DUE",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Auscultate apical pulse for 1 full minute prior to administration (>60 bpm required).",
-        "clinical_alert": "Narrow therapeutic index monitoring active.",
-        "requires_escalation": False,
-        "recorded_by": None,
-        "recorded_at": None,
-        "hold_reason": None,
-    },
-    {
-        "mar_id": "MAR-011",
-        "case_id": "CASE-004",
-        "patient_identifier": "DEMO-PT-004",
-        "patient_name": "Arthur Pendelton",
-        "medication": "Metoprolol Tartrate",
-        "dose": "25 mg",
-        "route": "Oral (PO)",
-        "scheduled_time": "08:00",
-        "status": "ADMINISTERED",
-        "prescribing_doctor": "Dr. Sarah Lin, MD",
-        "nursing_note": "Morning beta-blocker. Pre-dose HR: 74 bpm, BP: 126/78 mmHg.",
-        "clinical_alert": None,
-        "requires_escalation": False,
-        "recorded_by": "Elena Rostova, RN",
-        "recorded_at": "08 Oct 2026 08:10 UTC",
-        "hold_reason": None,
-    },
-]
-
-DETERMINISTIC_NURSE_VITALS_LABS = [
-    {
-        "id": "VIT-001",
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "patient_name": "Sarah Jenkins",
-        "parameter": "Blood Pressure",
-        "value": "128/78",
-        "unit": "mmHg",
-        "recorded_time": "08:10",
-        "status": "Normal",
-        "source_type": "Bedside Vitals Monitor",
-        "recorded_by": "Elena Rostova, RN",
-    },
-    {
-        "id": "VIT-002",
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "patient_name": "Sarah Jenkins",
-        "parameter": "Heart Rate",
-        "value": "82",
-        "unit": "bpm",
-        "recorded_time": "08:10",
-        "status": "Normal",
-        "source_type": "Bedside Vitals Monitor",
-        "recorded_by": "Elena Rostova, RN",
-    },
-    {
-        "id": "VIT-003",
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "patient_name": "Sarah Jenkins",
-        "parameter": "SpO₂",
-        "value": "97",
-        "unit": "%",
-        "recorded_time": "08:10",
-        "status": "Normal",
-        "source_type": "Pulse Oximetry",
-        "recorded_by": "Elena Rostova, RN",
-    },
-    {
-        "id": "VIT-004",
-        "case_id": "CASE-001",
-        "patient_identifier": "DEMO-PT-001",
-        "patient_name": "Sarah Jenkins",
-        "parameter": "Prothrombin Time (INR)",
-        "value": "3.4",
-        "unit": "ratio",
-        "recorded_time": "07:45",
-        "status": "High",
-        "source_type": "Pathology Core Lab (LAB-2026-0001)",
-        "recorded_by": "Verified Laboratory Feed",
-    },
-    {
-        "id": "VIT-005",
-        "case_id": "CASE-002",
-        "patient_identifier": "DEMO-PT-002",
-        "patient_name": "Robert Chen",
-        "parameter": "Serum Creatinine",
-        "value": "2.4",
-        "unit": "mg/dL",
-        "recorded_time": "08:15",
-        "status": "High",
-        "source_type": "Pathology Core Lab (LAB-2026-0002)",
-        "recorded_by": "Verified Laboratory Feed",
-    },
-    {
-        "id": "VIT-006",
-        "case_id": "CASE-002",
-        "patient_identifier": "DEMO-PT-002",
-        "patient_name": "Robert Chen",
-        "parameter": "Blood Pressure",
-        "value": "134/82",
-        "unit": "mmHg",
-        "recorded_time": "08:00",
-        "status": "Normal",
-        "source_type": "Bedside Vitals Monitor",
-        "recorded_by": "Elena Rostova, RN",
-    },
-    {
-        "id": "VIT-007",
-        "case_id": "CASE-002",
-        "patient_identifier": "DEMO-PT-002",
-        "patient_name": "Robert Chen",
-        "parameter": "Pulse Rate",
-        "value": "76",
-        "unit": "bpm",
-        "recorded_time": "08:00",
-        "status": "Normal",
-        "source_type": "Bedside Vitals Monitor",
-        "recorded_by": "Elena Rostova, RN",
-    },
-    {
-        "id": "VIT-008",
-        "case_id": "CASE-003",
-        "patient_identifier": "DEMO-PT-003",
-        "patient_name": "Elena Rostova",
-        "parameter": "Serum Potassium (K+)",
-        "value": "5.3",
-        "unit": "mEq/L",
-        "recorded_time": "08:20",
-        "status": "High",
-        "source_type": "Pathology Core Lab (LAB-2026-0003)",
-        "recorded_by": "Verified Laboratory Feed",
-    },
-    {
-        "id": "VIT-009",
-        "case_id": "CASE-003",
-        "patient_identifier": "DEMO-PT-003",
-        "patient_name": "Elena Rostova",
-        "parameter": "Blood Pressure",
-        "value": "142/88",
-        "unit": "mmHg",
-        "recorded_time": "08:15",
-        "status": "Borderline",
-        "source_type": "Bedside Vitals Monitor",
-        "recorded_by": "Elena Rostova, RN",
-    },
-    {
-        "id": "VIT-010",
-        "case_id": "CASE-004",
-        "patient_identifier": "DEMO-PT-004",
-        "patient_name": "Arthur Pendelton",
-        "parameter": "Apical Heart Rate",
-        "value": "72",
-        "unit": "bpm",
-        "recorded_time": "08:00",
-        "status": "Normal",
-        "source_type": "Manual Auscultation",
-        "recorded_by": "Elena Rostova, RN",
-    },
-    {
-        "id": "VIT-011",
-        "case_id": "CASE-004",
-        "patient_identifier": "DEMO-PT-004",
-        "patient_name": "Arthur Pendelton",
-        "parameter": "Serum Digoxin",
-        "value": "1.1",
-        "unit": "ng/mL",
-        "recorded_time": "07:30",
-        "status": "Normal",
-        "source_type": "Therapeutic Drug Monitoring",
-        "recorded_by": "Verified Laboratory Feed",
-    },
-]
-
-
-@router.get("/api/dashboard/nurse", summary="Nurse Dashboard: MAR records, vitals/lab ingestion, and safety monitoring")
+@router.get("/api/dashboard/nurse", summary="Nurse Dashboard: persisted medications and labs")
 def get_nurse_dashboard_data(
     db: Session = Depends(get_db),
-    audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(require_role(["Nurse", "Doctor", "Administrator"])),
 ):
-    """
-    Nurse Dashboard:
-    - Medication Administration Record (MAR) with realistic case-linked schedules.
-    - Rapid Inpatient Lab / Vitals Ingestion table.
-    - Today's Nursing Activity Summary.
-    """
+    """Return persisted medication and laboratory records; the schema has no MAR schedule."""
     patients = db.execute(select(Patient).order_by(Patient.id)).scalars().all()
-    assigned_count = len(patients) if patients else 4
+    medications = db.execute(select(Medication).order_by(Medication.patient_id, Medication.id)).scalars().all()
+    labs = db.execute(select(Lab).order_by(Lab.patient_id, Lab.id)).scalars().all()
 
-    # Calculate real-time stats
-    due_count = sum(1 for m in DETERMINISTIC_NURSE_MAR if m["status"] == "DUE")
-    admin_count = sum(1 for m in DETERMINISTIC_NURSE_MAR if m["status"] == "ADMINISTERED")
-    held_count = sum(1 for m in DETERMINISTIC_NURSE_MAR if m["status"] == "HELD")
-    vitals_count = len(DETERMINISTIC_NURSE_VITALS_LABS)
-    attention_count = sum(1 for m in DETERMINISTIC_NURSE_MAR if m.get("requires_escalation")) + sum(1 for v in DETERMINISTIC_NURSE_VITALS_LABS if v["status"] in {"High", "Critical"})
+    high_attention_findings = db.execute(
+        select(Finding).where(Finding.severity.in_(["critical", "high", "major"]))
+    ).scalars().all()
+    events = db.execute(
+        select(Event).where(Event.event_type.in_(["MEDICATION_ADMINISTERED", "MEDICATION_HELD"]))
+        .order_by(desc(Event.created_at), desc(Event.id))
+    ).scalars().all()
+    latest_mar_event = {}
+    for event in events:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        medication_id = payload.get("medication_id")
+        if isinstance(medication_id, int):
+            latest_mar_event.setdefault(int(medication_id), event)
+
+    patients_by_id = {patient.id: patient for patient in patients}
+    mar_rows = []
+    for medication in medications:
+        patient = patients_by_id.get(medication.patient_id)
+        event = latest_mar_event.get(medication.id)
+        payload = event.payload if event and isinstance(event.payload, dict) else {}
+        mar_rows.append({
+            "id": f"MED-{medication.id}",
+            "mar_id": f"MED-{medication.id}",
+            "case_id": patient.patient_identifier if patient else None,
+            "patient_id": patient.id if patient else medication.patient_id,
+            "patient_identifier": patient.patient_identifier if patient else None,
+            "patient_name": patient.name if patient else None,
+            "medication_id": medication.id,
+            "medication": medication.drug_name,
+            "dose": " ".join(part for part in (medication.dose, medication.dose_unit) if part),
+            "route": medication.route,
+            "scheduled_time": None,
+            "nursing_note": "No administration schedule is stored in the database.",
+            "status": payload.get("status", "NOT_RECORDED"),
+            "recorded_at": event.created_at.isoformat() if event else None,
+            "recorded_by": event.payload.get("recorded_by") if event and isinstance(event.payload, dict) else None,
+            "prescribing_doctor": None,
+            "clinical_alert": None,
+        })
+
+    lab_rows = []
+    for lab in labs:
+        patient = patients_by_id.get(lab.patient_id)
+        lab_rows.append({
+            "id": lab.id,
+            "patient_id": patient.id if patient else lab.patient_id,
+            "patient_identifier": patient.patient_identifier if patient else None,
+            "patient_name": patient.name if patient else None,
+            "parameter": lab.test_name,
+            "value": lab.value,
+            "unit": lab.unit,
+            "reference_range": lab.reference_range,
+            "recorded_time": lab.measured_at.isoformat() if lab.measured_at else None,
+            "status": "RECORDED",
+            "source_type": "Persisted laboratory record",
+        })
 
     return {
         "role": "Nurse",
-        "nurse_name": current_user.full_name if current_user else "Elena Rostova, RN",
+        "nurse_name": current_user.full_name,
         "title": "Medication Administration Record & Inpatient Monitoring",
         "stats": {
-            "medications_due": due_count,
-            "medications_administered": admin_count,
-            "medications_held": held_count,
-            "vitals_recorded": vitals_count,
-            "attention_required": attention_count,
-            "assigned_patients_count": assigned_count,
+            "medications_due": 0,
+            "medications_administered": sum(1 for row in mar_rows if row["status"] == "ADMINISTERED"),
+            "medications_held": sum(1 for row in mar_rows if row["status"] == "HELD"),
+            "vitals_recorded": len(lab_rows),
+            "attention_required": len(high_attention_findings),
+            "assigned_patients_count": len(patients),
         },
-        "mar_schedule": DETERMINISTIC_NURSE_MAR,
-        "vitals_labs": DETERMINISTIC_NURSE_VITALS_LABS,
+        "mar_schedule": mar_rows,
+        "vitals_labs": lab_rows,
+        "patients": [
+            {"patient_identifier": patient.patient_identifier, "name": patient.name}
+            for patient in patients
+        ],
+        "mar_schedule_available": False,
+        "mar_schedule_note": "No administration schedule is stored in the current database schema.",
     }
 
 
@@ -961,153 +341,126 @@ class NurseMARActionRequest(BaseModel):
     medication: Optional[str] = None
     dose: Optional[str] = None
     route: Optional[str] = None
-    nurse_name: str = "Elena Rostova, RN"
+    nurse_name: Optional[str] = None
     notes: Optional[str] = None
     hold_reason: Optional[str] = None
 
 
-@router.post("/api/dashboard/nurse/mar-action", summary="Record Medication Administration or Safety Hold with SHA-256 Audit")
+@router.post("/api/dashboard/nurse/mar-action", summary="Persist medication administration or hold")
 def record_nurse_mar_action(
     req: NurseMARActionRequest,
+    db: Session = Depends(get_db),
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
+    current_user: User = Depends(require_role(["Nurse"])),
 ):
-    """
-    Records a nurse's medication administration or safety hold event into the cryptographic audit ledger.
-    """
     action_type = req.action.strip().upper()
-    is_admin = action_type in ("ADMINISTER", "ADMINISTERED")
-    event_type = "MEDICATION_ADMINISTERED" if is_admin else "MEDICATION_HELD"
-    new_status = "ADMINISTERED" if is_admin else "HELD"
-
-    timestamp_str = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-
-    # Match in-memory deterministic record
-    target_mar = None
-    for m in DETERMINISTIC_NURSE_MAR:
-        if m.get("mar_id") == req.mar_id or m.get("id") == req.mar_id:
-            target_mar = m
-            m["status"] = new_status
-            m["recorded_by"] = req.nurse_name
-            m["recorded_at"] = timestamp_str
-            if req.notes:
-                m["nursing_note"] = req.notes
-            if req.hold_reason:
-                m["hold_reason"] = req.hold_reason
-            break
-
-    case_id = req.case_id or (target_mar.get("case_id") if target_mar else "CASE-UNKNOWN")
-    patient_name = req.patient_name or (target_mar.get("patient_name") if target_mar else "Unknown Patient")
-    medication = req.medication or (target_mar.get("medication") if target_mar else "Scheduled Medication")
-    dose = req.dose or (target_mar.get("dose") if target_mar else "")
-    route = req.route or (target_mar.get("route") if target_mar else "")
-
-    audit_payload = {
-        "mar_id": req.mar_id,
-        "case_id": case_id,
-        "patient_name": patient_name,
-        "medication": medication,
-        "dose": dose,
-        "route": route,
-        "nurse": req.nurse_name,
-        "action": event_type,
-        "status": new_status,
-        "notes": req.notes or ("Medication administered as scheduled." if is_admin else "Medication held due to clinical caution."),
+    if action_type not in {"ADMINISTER", "ADMINISTERED", "HOLD", "HELD"}:
+        raise HTTPException(status_code=422, detail="Unsupported medication record action.")
+    try:
+        medication_id = int(req.mar_id.removeprefix("MED-"))
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Medication record not found.") from exc
+    medication = db.get(Medication, medication_id)
+    if medication is None or (medication.status or "").lower() not in {"active", "ordered", "pending"}:
+        raise HTTPException(status_code=404, detail="Active medication record not found.")
+    patient = db.get(Patient, medication.patient_id)
+    if patient is None:
+        raise HTTPException(status_code=409, detail="Medication patient record is unavailable.")
+    existing = db.execute(
+        select(Event).where(Event.event_type.in_(["MEDICATION_ADMINISTERED", "MEDICATION_HELD"]))
+        .order_by(desc(Event.created_at), desc(Event.id))
+    ).scalars().all()
+    for event in existing:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        if payload.get("medication_id") == medication.id and payload.get("status") == "ADMINISTERED":
+            raise HTTPException(status_code=409, detail="Medication is already recorded as administered.")
+    status_text = "ADMINISTERED" if action_type in {"ADMINISTER", "ADMINISTERED"} else "HELD"
+    event_type = "MEDICATION_ADMINISTERED" if status_text == "ADMINISTERED" else "MEDICATION_HELD"
+    payload = {
+        "medication_id": medication.id,
+        "patient_identifier": patient.patient_identifier,
+        "medication": medication.drug_name,
+        "status": status_text,
+        "recorded_by": current_user.full_name,
+        "notes": req.notes,
         "hold_reason": req.hold_reason,
     }
-
-    record = audit_ledger.append_event(
-        actor=f"{req.nurse_name} (Nurse)",
-        event_type=event_type,
-        payload=audit_payload,
+    stored = Event(patient_id=patient.id, event_type=event_type, payload=payload)
+    db.add(stored)
+    db.commit()
+    db.refresh(stored)
+    audit_record = audit_ledger.append_event(
+        actor=f"{current_user.full_name} (Nurse)", event_type=event_type, payload={**payload, "event_id": stored.id}
     )
-
     return {
-        "status": new_status,
+        "status": status_text,
         "event_type": event_type,
-        "mar_id": req.mar_id,
-        "audit_hash": record.hash,
-        "message": f"Medication {medication} marked as {new_status} by {req.nurse_name}. Cryptographic audit sealed.",
+        "mar_id": f"MED-{medication.id}",
+        "audit_hash": audit_record.hash,
+        "message": "Medication status event persisted.",
     }
 
 
 class NurseRecordVitalRequest(BaseModel):
     case_id: str
-    patient_name: str
-    parameter: str
-    value: str
-    unit: str
-    nurse_name: str = "Elena Rostova, RN"
+    patient_name: Optional[str] = None
+    parameter: str = Field(min_length=1, max_length=255)
+    value: str = Field(min_length=1, max_length=100)
+    unit: str = Field(min_length=1, max_length=50)
+    nurse_name: Optional[str] = None
     notes: Optional[str] = None
 
 
-@router.post("/api/dashboard/nurse/record-vital", summary="Record Inpatient Vital or Point-of-Care Lab with SHA-256 Audit")
+@router.post("/api/dashboard/nurse/record-vital", summary="Persist a laboratory or bedside measurement")
 def record_nurse_vital(
     req: NurseRecordVitalRequest,
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["Nurse"])),
 ):
-    """
-    Records an inpatient vital sign or point-of-care lab entry, evaluates normal/high status, and logs a tamper-evident audit event.
-    """
-    time_str = datetime.utcnow().strftime("%H:%M")
-    
-    # Assess status
-    val_status = "Normal"
-    val_clean = req.value.strip()
-    param_clean = req.parameter.strip().lower()
-    
-    try:
-        num_val = float(val_clean.split("/")[0]) if "/" in val_clean else float(val_clean)
-        if "creatinine" in param_clean and num_val > 1.3:
-            val_status = "High"
-        elif "potassium" in param_clean and num_val > 5.0:
-            val_status = "High"
-        elif "inr" in param_clean and num_val > 3.0:
-            val_status = "High"
-        elif "pressure" in param_clean and (num_val > 140 or (len(val_clean.split("/")) > 1 and float(val_clean.split("/")[1]) > 90)):
-            val_status = "Borderline"
-        elif "spo" in param_clean and num_val < 92:
-            val_status = "Critical"
-    except Exception:
-        pass
-
-    new_id = f"VIT-0{len(DETERMINISTIC_NURSE_VITALS_LABS) + 1:02d}"
-    entry = {
-        "id": new_id,
-        "case_id": req.case_id,
-        "patient_identifier": req.case_id,
-        "patient_name": req.patient_name,
-        "parameter": req.parameter,
-        "value": req.value,
-        "unit": req.unit,
-        "recorded_time": time_str,
-        "status": val_status,
-        "source_type": "Nurse Bedside Entry",
-        "recorded_by": req.nurse_name,
-    }
-    DETERMINISTIC_NURSE_VITALS_LABS.insert(0, entry)
-
-    audit_record = audit_ledger.append_event(
-        actor=f"{req.nurse_name} (Nurse)",
-        event_type="VITAL_SIGN_RECORDED",
-        payload={
-            "vital_id": new_id,
-            "case_id": req.case_id,
-            "patient_name": req.patient_name,
-            "parameter": req.parameter,
-            "value": req.value,
-            "unit": req.unit,
-            "status": val_status,
-            "nurse": req.nurse_name,
-        },
+    patient = _find_history_patient(db, req.case_id)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    lab = Lab(
+        patient_id=patient.id,
+        test_name=req.parameter.strip(),
+        value=req.value.strip(),
+        unit=req.unit.strip(),
+        measured_at=datetime.utcnow(),
     )
-
+    db.add(lab)
+    db.commit()
+    db.refresh(lab)
+    payload = {
+        "lab_id": lab.id,
+        "patient_identifier": patient.patient_identifier,
+        "parameter": lab.test_name,
+        "value": lab.value,
+        "unit": lab.unit,
+        "recorded_by": current_user.full_name,
+    }
+    audit_record = audit_ledger.append_event(
+        actor=f"{current_user.full_name} (Nurse)", event_type="VITAL_SIGN_RECORDED", payload=payload
+    )
+    entry = {
+        "id": lab.id,
+        "case_id": patient.patient_identifier,
+        "patient_identifier": patient.patient_identifier,
+        "patient_name": patient.name,
+        "parameter": lab.test_name,
+        "value": lab.value,
+        "unit": lab.unit,
+        "recorded_time": lab.measured_at.isoformat(),
+        "status": "RECORDED",
+        "source_type": "Persisted laboratory record",
+        "recorded_by": current_user.full_name,
+    }
     return {
         "status": "RECORDED",
         "record": entry,
         "vital_entry": entry,
         "audit_hash": audit_record.hash,
-        "message": f"Vital {req.parameter} ({req.value} {req.unit}) recorded for {req.patient_name}. SHA-256 hash sealed.",
+        "message": "Measurement persisted.",
     }
 
 
@@ -1115,293 +468,114 @@ def record_nurse_vital(
 # PHARMACIST WORKFLOW: MEDICATION FULFILLMENT & SUBSTITUTION
 # =========================================================================
 
-@router.get("/api/dashboard/pharmacist", summary="Pharmacist Dashboard: Medication Fulfillment & Substitution")
+@router.get("/api/dashboard/pharmacist", summary="Pharmacist Dashboard: persisted prescriptions")
 def get_pharmacist_dashboard_data(
     db: Session = Depends(get_db),
-    audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    resolution_engine=Depends(get_resolution_engine),
     current_user: User = Depends(require_role(["Clinical Pharmacist"])),
 ):
-    """
-    Pharmacist Dashboard: Medication Fulfillment & Substitution.
-    Primary workflow: Doctor Prescription -> Check Medication Availability -> If Available -> Proceed for Dispensing
-    If NOT Available -> Identify Available Equivalent Brand -> Send Substitution Request to Doctor -> Doctor Verification / Approval -> Dispensing.
-    """
-    all_events = audit_ledger.get_events()
+    """Return persisted orders and substitution requests. Inventory is not modeled in this database."""
+    orders = db.execute(select(Order).order_by(desc(Order.ordered_at), desc(Order.id))).scalars().all()
+    order_ids = [order.id for order in orders]
+    requests_query = select(SubstitutionRequest).where(SubstitutionRequest.order_id.in_(order_ids))
+    if getattr(current_user, "id", None) is not None:
+        requests_query = requests_query.where(SubstitutionRequest.requested_by_user_id == current_user.id)
+    requests = db.execute(
+        requests_query.order_by(desc(SubstitutionRequest.created_at), desc(SubstitutionRequest.id))
+    ).scalars().all() if order_ids else []
+    latest_request = {}
+    for request in requests:
+        latest_request.setdefault(request.order_id, request)
 
-    # Keep the append-only ledger for audit/verification; request state comes from the ORM table.
-    verified_events = {e.payload.get("case_id"): e for e in all_events if e.event_type in ("PHARMACIST_PRESCRIPTION_VERIFIED", "MEDICATION_MARKED_READY_FOR_DISPENSING") and isinstance(e.payload, dict)}
-    clarif_events = {e.payload.get("case_id"): e for e in all_events if e.event_type in ("PHARMACIST_CLARIFICATION_REQUESTED", "DOCTOR_CLARIFICATION_REQUESTED") and isinstance(e.payload, dict)}
-    own_requests = db.execute(
-        select(SubstitutionRequest)
-        .where(SubstitutionRequest.requested_by_user_id == current_user.id)
-        .order_by(desc(SubstitutionRequest.created_at), desc(SubstitutionRequest.id))
-    ).scalars().all()
-    requests_by_order = {}
-    for request in own_requests:
-        requests_by_order.setdefault(request.order_id, request)
-
-    # Deterministic Local Medication Inventory
-    local_inventory = [
-        {"medication": "Warfarin Sodium", "brand_name": "Coumadin", "strength": "2.5 mg", "formulation": "Oral Tablet", "stock": 420, "unit": "tabs", "status": "AVAILABLE", "location": "Bin A-04", "batch": "WF-88392", "expiry": "2027-11"},
-        {"medication": "Warfarin Sodium", "brand_name": "Jantoven", "strength": "2.5 mg", "formulation": "Oral Tablet", "stock": 310, "unit": "tabs", "status": "AVAILABLE", "location": "Bin A-05", "batch": "WF-88104", "expiry": "2027-09"},
-        {"medication": "Fluconazole", "brand_name": "Diflucan", "strength": "100 mg", "formulation": "Oral Tablet", "stock": 140, "unit": "tabs", "status": "AVAILABLE", "location": "Bin B-12", "batch": "FL-22910", "expiry": "2027-04"},
-        {"medication": "Enoxaparin Sodium", "brand_name": "Lovenox", "strength": "80 mg / 0.8 mL", "formulation": "Pre-filled Syringe", "stock": 0, "unit": "syringes", "status": "UNAVAILABLE", "location": "Bin D-10", "batch": "OUT-OF-STOCK", "expiry": "-"},
-        {"medication": "Enoxaparin Sodium", "brand_name": "Clexane", "strength": "80 mg / 0.8 mL", "formulation": "Pre-filled Syringe", "stock": 60, "unit": "syringes", "status": "AVAILABLE", "location": "Bin D-12", "batch": "CX-88102", "expiry": "2028-02"},
-        {"medication": "Enoxaparin Sodium", "brand_name": "Inhixa", "strength": "80 mg / 0.8 mL", "formulation": "Pre-filled Syringe", "stock": 45, "unit": "syringes", "status": "AVAILABLE", "location": "Bin D-14", "batch": "IN-33201", "expiry": "2027-10"},
-        {"medication": "Enoxaparin Sodium", "brand_name": "Lovenox", "strength": "30 mg / 0.3 mL", "formulation": "Pre-filled Syringe", "stock": 85, "unit": "syringes", "status": "AVAILABLE", "location": "Bin D-08", "batch": "EN-44102", "expiry": "2027-12"},
-        {"medication": "Heparin Sodium", "brand_name": "Heparin Generic", "strength": "5,000 USP Units / mL", "formulation": "IV / SC Vial", "stock": 150, "unit": "vials", "status": "AVAILABLE", "location": "Bin D-01", "batch": "HP-77120", "expiry": "2028-03"},
-        {"medication": "Lisinopril", "brand_name": "Prinivil", "strength": "20 mg", "formulation": "Oral Tablet", "stock": 600, "unit": "tabs", "status": "AVAILABLE", "location": "Bin E-04", "batch": "LS-20441", "expiry": "2028-07"},
-        {"medication": "Lisinopril", "brand_name": "Zestril", "strength": "20 mg", "formulation": "Oral Tablet", "stock": 250, "unit": "tabs", "status": "AVAILABLE", "location": "Bin E-05", "batch": "ZS-20109", "expiry": "2028-09"},
-        {"medication": "Digoxin", "brand_name": "Lanoxin", "strength": "0.125 mg", "formulation": "Oral Tablet", "stock": 180, "unit": "tabs", "status": "AVAILABLE", "location": "Bin F-06", "batch": "DG-0125", "expiry": "2027-04"},
-        {"medication": "Digoxin", "brand_name": "Digitek", "strength": "0.125 mg", "formulation": "Oral Tablet", "stock": 90, "unit": "tabs", "status": "AVAILABLE", "location": "Bin F-07", "batch": "DT-0129", "expiry": "2027-08"},
-    ]
-
-    # Deterministic Medication Availability Queue
-    # Represents prescriptions received from Doctor workflow
-    raw_queue = [
-        {
-            "case_id": "CASE-001",
-            "patient_id": 1,
-            "patient_name": "Sarah Jenkins",
-            "patient_identifier": "DEMO-PT-001",
-            "mrn": "MRN-2026-9041",
-            "age": 64,
-            "sex": "Female",
-            "prescribed_medicine": "Warfarin Sodium (Coumadin)",
-            "prescribed_brand": "Coumadin",
-            "generic_name": "Warfarin Sodium",
-            "strength": "2.5 mg",
-            "formulation": "Oral Tablet",
-            "route": "Oral",
-            "frequency": "Once Daily (Q24H)",
-            "prescribing_doctor": "Dr. Sarah Lin, MD (Cardiology)",
-            "availability": "AVAILABLE",
-            "available_quantity": 420,
-            "available_qty_formatted": "420 Tablets (Bin A-04, Batch #WF-88392)",
-            "substitution_status": "No Substitution Needed",
-            "doctor_recommendation": "Warfarin dose reduction to 2.5 mg PO Daily",
-            "available_alternatives": [],
-            "action": "CHECK_AVAILABILITY"
-        },
-        {
-            "case_id": "CASE-002",
-            "patient_id": 2,
-            "patient_name": "Robert Chen",
-            "patient_identifier": "DEMO-PT-002",
-            "mrn": "MRN-2026-8812",
-            "age": 72,
-            "sex": "Male",
-            "prescribed_medicine": "Enoxaparin Sodium (Lovenox)",
-            "prescribed_brand": "Lovenox",
-            "generic_name": "Enoxaparin Sodium",
-            "strength": "80 mg / 0.8 mL",
-            "formulation": "Pre-filled Syringe",
-            "route": "Subcutaneous",
-            "frequency": "Once Daily (Q24H)",
-            "prescribing_doctor": "Dr. Sarah Lin, MD (Nephrology / ID)",
-            "availability": "UNAVAILABLE",
-            "available_quantity": 0,
-            "available_qty_formatted": "0 Syringes (Out of Stock)",
-            "substitution_status": "Doctor Approval Required",
-            "doctor_recommendation": "Enoxaparin therapeutic anticoagulation 80 mg SC Daily",
-            "available_alternatives": [
-                {
-                    "brand_name": "Clexane",
-                    "generic_name": "Enoxaparin Sodium",
-                    "strength": "80 mg / 0.8 mL",
-                    "formulation": "Pre-filled Syringe",
-                    "same_active_ingredient": True,
-                    "same_strength": True,
-                    "availability": "AVAILABLE",
-                    "stock": "60 Syringes (Bin D-12, Batch #CX-88102)"
-                },
-                {
-                    "brand_name": "Inhixa",
-                    "generic_name": "Enoxaparin Sodium",
-                    "strength": "80 mg / 0.8 mL",
-                    "formulation": "Pre-filled Syringe",
-                    "same_active_ingredient": True,
-                    "same_strength": True,
-                    "availability": "AVAILABLE",
-                    "stock": "45 Syringes (Bin D-14, Batch #IN-33201)"
-                }
-            ],
-            "action": "SUGGEST_SUBSTITUTION"
-        },
-        {
-            "case_id": "CASE-003",
-            "patient_id": 3,
-            "patient_name": "Elena Rostova",
-            "patient_identifier": "DEMO-PT-003",
-            "mrn": "MRN-2026-7734",
-            "age": 58,
-            "sex": "Female",
-            "prescribed_medicine": "Lisinopril (Prinivil)",
-            "prescribed_brand": "Prinivil",
-            "generic_name": "Lisinopril",
-            "strength": "20 mg",
-            "formulation": "Oral Tablet",
-            "route": "Oral",
-            "frequency": "Once Daily (QAM)",
-            "prescribing_doctor": "Dr. Sarah Lin, MD (Internal Medicine)",
-            "availability": "AVAILABLE",
-            "available_quantity": 600,
-            "available_qty_formatted": "600 Tablets (Bin E-04, Batch #LS-20441)",
-            "substitution_status": "No Substitution Needed",
-            "doctor_recommendation": "Maintain Lisinopril 20 mg PO monotherapy; deprescribe duplicate Enalapril",
-            "available_alternatives": [],
-            "action": "CHECK_AVAILABILITY"
-        },
-        {
-            "case_id": "CASE-004",
-            "patient_id": 4,
-            "patient_name": "Arthur Pendelton",
-            "patient_identifier": "DEMO-PT-004",
-            "mrn": "MRN-2026-6629",
-            "age": 79,
-            "sex": "Male",
-            "prescribed_medicine": "Digoxin (Lanoxin)",
-            "prescribed_brand": "Lanoxin",
-            "generic_name": "Digoxin",
-            "strength": "0.125 mg",
-            "formulation": "Oral Tablet",
-            "route": "Oral",
-            "frequency": "Once Daily (Q24H)",
-            "prescribing_doctor": "Dr. Sarah Lin, MD (Cardiology)",
-            "availability": "AVAILABLE",
-            "available_quantity": 180,
-            "available_qty_formatted": "180 Tablets (Bin F-06, Batch #DG-0125)",
-            "substitution_status": "No Substitution Needed",
-            "doctor_recommendation": "Reduce Digoxin dose to 0.125 mg PO Daily; repeat TDM at Day 7",
-            "available_alternatives": [],
-            "action": "CHECK_AVAILABILITY"
-        }
-    ]
-
-    availability_queue = []
-    for item in raw_queue:
-        item = dict(item)
-        c_id = item["case_id"]
-        patient, persisted_order, persisted_medication = _find_persisted_queue_order(db, item)
-        request = requests_by_order.get(persisted_order.id) if persisted_order is not None else None
-        if patient is not None:
-            item["patient_id"] = patient.id
-            item["patient_name"] = patient.name
-            item["patient_identifier"] = patient.patient_identifier
-        else:
-            item["patient_id"] = None
-        item["order_id"] = persisted_order.id if persisted_order is not None else None
-        item["medication_id"] = persisted_medication.id if persisted_medication is not None else None
-
-        # A persisted request always takes precedence over legacy case-level audit events.
-        if request is not None and request.status == "pending":
+    queue = []
+    for order in orders:
+        patient = db.get(Patient, order.patient_id)
+        medication = db.get(Medication, order.medication_id) if order.medication_id else None
+        request = latest_request.get(order.id)
+        request_status = request.status if request else None
+        if request_status == "pending":
             status_text = "Pending Doctor Verification"
-            dispense_ready = False
-            sub_status = "Doctor Approval Pending"
-        elif request is not None and request.status == "approved":
-            status_text = "Substitution Approved by Doctor"
-            dispense_ready = True
-            sub_status = "Substitution Approved (Ready to Dispense)"
-        elif request is not None and request.status == "rejected":
+        elif request_status == "approved":
+            status_text = "Substitution Approved (Ready to Dispense)"
+        elif request_status == "rejected":
             status_text = "Substitution Rejected by Doctor"
-            dispense_ready = False
-            sub_status = "Substitution Rejected"
-        elif request is not None and request.status == "clarification_required":
+        elif request_status == "clarification_required":
             status_text = "Clarification Required"
-            dispense_ready = False
-            sub_status = "Clarification Required"
-        elif c_id in verified_events:
-            status_text = "Ready for Dispensing"
-            dispense_ready = True
-            sub_status = "Dispensing Authorized ✓"
         else:
-            status_text = "Available for Dispensing" if item["availability"] == "AVAILABLE" else "Medication Unavailable"
-            dispense_ready = item["availability"] == "AVAILABLE"
-            sub_status = "No Substitution Needed" if item["availability"] == "AVAILABLE" else "Doctor Approval Required"
+            status_text = order.status or "Status not recorded"
 
-        availability_queue.append({
-            **item,
+        dose = " ".join(part for part in (order.dose, order.dose_unit) if part)
+        queue.append({
+            "case_id": patient.patient_identifier if patient else "",
+            "order_id": order.id,
+            "medication_id": medication.id if medication else None,
+            "patient_id": patient.id if patient else order.patient_id,
+            "patient_name": patient.name if patient else "",
+            "patient_identifier": patient.patient_identifier if patient else None,
+            "prescribed_medicine": order.drug_name,
+            "medication": order.drug_name,
+            "prescribed_brand": None,
+            "mrn": None,
+            "prescribing_doctor": None,
+            "generic_name": medication.drug_name if medication else order.drug_name,
+            "strength": dose,
+            "formulation": "Not recorded",
+            "route": order.route,
+            "frequency": order.frequency,
+            "availability": "UNTRACKED",
+            "available_quantity": None,
+            "available_qty_formatted": "Inventory is not recorded",
+            "substitution_status": status_text,
+            "substitution_request_id": request.id if request else None,
+            "substitution_request_status": request_status,
+            "suggested_brand": request.suggested_brand if request else None,
             "status": status_text,
-            "substitution_status": sub_status,
-            "substitution_request_id": request.id if request is not None else None,
-            "substitution_request_status": request.status if request is not None else None,
-            "is_ready_for_dispensing": dispense_ready,
-            "medication": item["prescribed_medicine"],  # compatibility
-            "age": item["age"],
-            "doctor_name": item["prescribing_doctor"],
-            "doctor_suggested_alt": "Micafungin 100 mg IV Daily" if c_id == "CASE-001" else "Clexane 80 mg / 0.8 mL" if c_id == "CASE-002" else "None Required",
-            "alt_availability": "Available",
+            "is_ready_for_dispensing": False,
+            "ordered_at": order.ordered_at.isoformat() if order.ordered_at else None,
         })
 
-    # Metrics computation
-    total_received = len(availability_queue)
-    available_cnt = sum(1 for q in availability_queue if q["availability"] == "AVAILABLE")
-    unavailable_cnt = sum(1 for q in availability_queue if q["availability"] == "UNAVAILABLE")
-    sub_requests_cnt = sum(1 for q in availability_queue if q["substitution_request_id"] is not None)
-    doctor_pending_cnt = sum(1 for q in availability_queue if q["substitution_request_status"] == "pending")
-    ready_cnt = sum(1 for q in availability_queue if q["is_ready_for_dispensing"] and (q["status"] == "Ready for Dispensing" or "Approved" in q["status"]))
-
-    # Clinical pharmacology interaction profiles (Secondary Reference)
-    pharmacology_insights = [
-        {
-            "pair": "Warfarin + Fluconazole",
-            "mechanism": "Potent CYP2C9 inhibition by fluconazole impairs hepatic clearance of active S-warfarin enantiomer.",
-            "clinical_impact": "Rapid INR prolongation, severe bleeding risk within 48–72 hours.",
-            "recommended_action": "Reduce warfarin maintenance dose by 50% or substitute antifungal; repeat INR Day 3.",
-            "evidence_source": "DDInter / FDA Drug Label",
-            "evidence_id": "AEGIS-DEMO-EV-001",
-            "provenance": "Rule Pack: aegis_hackathon_demo v1.0.0",
-        },
-        {
-            "pair": "Enoxaparin + Declining Renal Function",
-            "mechanism": "Enoxaparin (LMWH) is eliminated primarily by renal filtration. Reduced GFR results in high anti-Xa bioaccumulation.",
-            "clinical_impact": "Major internal retroperitoneal/GI hemorrhage risk.",
-            "recommended_action": "Reduce dose to 30 mg SC once daily if CrCl < 30 mL/min; monitor peak anti-Xa or convert to UFH.",
-            "evidence_source": "OpenFDA Black Box / CPIC Guidelines",
-            "evidence_id": "AEGIS-DEMO-EV-002",
-            "provenance": "Rule Pack: aegis_hackathon_demo v1.0.0",
-        },
-        {
-            "pair": "Lisinopril + Enalapril (Duplicate ACE-I)",
-            "mechanism": "Dual angiotensin-converting enzyme inhibition causes additive vasodilation and aldosterone suppression.",
-            "clinical_impact": "Refractory hypotension, acute renal failure, hyperkalemia (K > 5.5 mEq/L).",
-            "recommended_action": "Deprescribe enalapril; maintain single ACE-I regimen or substitute dihydropyridine CCB (amlodipine).",
-            "evidence_source": "ISMP High Alert / Beers Criteria",
-            "evidence_id": "AEGIS-DEMO-EV-003",
-            "provenance": "Rule Pack: aegis_hackathon_demo v1.0.0",
-        },
-    ]
-
+    findings = db.execute(select(Finding).order_by(desc(Finding.created_at), desc(Finding.id))).scalars().all()
+    reference = [{
+        "pair": finding.title,
+        "mechanism": finding.description,
+        "clinical_impact": finding.severity,
+        "recommended_action": finding.action,
+        "evidence_source": (finding.trace or {}).get("source") if isinstance(finding.trace, dict) else None,
+        "evidence_id": (finding.trace or {}).get("evidence_id") if isinstance(finding.trace, dict) else None,
+        "provenance": (finding.trace or {}).get("source_version") if isinstance(finding.trace, dict) else None,
+        "finding_id": finding.id,
+        "patient_id": finding.patient_id,
+        "title": finding.title,
+        "severity": finding.severity,
+        "description": finding.description,
+        "action": finding.action,
+        "created_at": finding.created_at.isoformat() if finding.created_at else None,
+    } for finding in findings]
+    pending = sum(1 for row in queue if row["substitution_request_status"] == "pending")
     return {
         "role": "Clinical Pharmacist",
         "title": "Medication Fulfillment & Substitution",
         "primary_purpose": "Medication Availability & Brand Substitution Verification",
         "pharmacist_name": current_user.full_name,
         "stats": {
-            "prescriptions_received": total_received,
-            "available": available_cnt,
-            "unavailable": unavailable_cnt,
-            "substitution_requests": sub_requests_cnt,
-            "doctor_approval_pending": doctor_pending_cnt,
-            "ready_for_dispensing": ready_cnt,
-            # Backward compatibility fields
-            "active_safety_rules": 3,
-            "cyp_enzyme_profiles": 5,
-            "renal_adjusted_drugs": 8,
-            "substitutions_available": 12,
-            "reevaluation_events_count": len(verified_events),
-            "pending_verification": total_received - ready_cnt,
-            "ready_to_dispense": ready_cnt,
-            "availability_issues": unavailable_cnt,
-            "clarification_required": len(clarif_events),
-            "verified_today": max(ready_cnt, 8),
+            "prescriptions_received": len(queue),
+            "available": 0,
+            "unavailable": 0,
+            "substitution_requests": sum(1 for row in queue if row["substitution_request_id"] is not None),
+            "doctor_approval_pending": pending,
+            "ready_for_dispensing": 0,
+            "pending_verification": len(queue) - pending,
+            "ready_to_dispense": 0,
+            "availability_issues": 0,
+            "clarification_required": sum(1 for row in queue if row["substitution_request_status"] == "clarification_required"),
+            "verified_today": 0,
+            "inventory_tracked": False,
         },
-        "availability_queue": availability_queue,
-        "verification_queue": availability_queue,  # backward compatibility
-        "local_inventory": local_inventory,
-        "pharmacology_insights": pharmacology_insights,
-        "pharmacology_reference": pharmacology_insights,  # backward compatibility alias
+        "availability_queue": queue,
+        "verification_queue": queue,
+        "local_inventory": [],
+        "inventory_available": False,
+        "pharmacology_insights": reference,
+        "pharmacology_reference": reference,
         "active_rules": [],
     }
 
@@ -1445,152 +619,228 @@ def process_doctor_substitution_decision(
 # PHARMACIST DISPENSE / VERIFICATION API
 # =========================================================================
 
-@router.post("/api/dashboard/pharmacist/dispense", summary="Pharmacist: Mark medication ready for dispensing")
-@router.post("/api/dashboard/pharmacist/verify", summary="Pharmacist: Verify & approve prescription for dispensing")
+@router.post("/api/dashboard/pharmacist/dispense", summary="Verify persisted order inventory status")
+@router.post("/api/dashboard/pharmacist/verify", summary="Verify persisted order inventory status")
 def mark_ready_for_dispensing(
     req: PharmacistVerificationRequest,
-    audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    current_user: Optional[User] = Depends(get_optional_user),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(["Clinical Pharmacist"])),
 ):
-    """
-    Pharmacist verifies medication availability and marks ready for dispensing.
-    Logs MEDICATION_MARKED_READY_FOR_DISPENSING & PHARMACIST_PRESCRIPTION_VERIFIED in the SHA-256 cryptographic audit ledger.
-    Does NOT re-run clinical interaction assessments.
-    """
-    actor = current_user.full_name if current_user else "Marcus Vance, PharmD, BCPS"
-    payload = {
-        "case_id": req.case_id,
-        "patient_id": req.patient_id,
-        "patient_name": req.patient_name or f"Case {req.case_id}",
-        "medication": req.medication,
-        "strength": req.strength,
-        "route": req.route,
-        "frequency": req.frequency or "As prescribed",
-        "doctor_recommendation": req.doctor_recommendation,
-        "pharmacist_name": actor,
-        "availability_status": req.availability_status,
-        "verification_status": "READY_FOR_DISPENSING",
-        "action_description": f"Verified {req.medication} {req.strength} for dispensing",
-        "notes": req.pharmacist_notes or "Prescription verified against dispensary stock. Ready for dispensing.",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-    }
-    
-    event = audit_ledger.append_event(
-        actor=actor,
-        event_type="PHARMACIST_PRESCRIPTION_VERIFIED",
-        payload=payload,
+    """Reject dispensing verification because the current schema has no inventory source."""
+    patient = _find_history_patient(db, req.case_id)
+    if patient is None or (req.patient_id is not None and req.patient_id != patient.id):
+        raise HTTPException(status_code=404, detail="Patient record not found.")
+    orders = db.execute(select(Order).where(Order.patient_id == patient.id)).scalars().all()
+    normalized = _normalize_medication_name(req.medication)
+    matches = [order for order in orders if normalized and normalized in _normalize_medication_name(order.drug_name)]
+    if len(matches) != 1:
+        raise HTTPException(status_code=404 if not matches else 409, detail="Order reference is missing or ambiguous.")
+    raise HTTPException(
+        status_code=409,
+        detail="Inventory is not tracked in the database; the order was not marked ready for dispensing.",
     )
 
-    return {
-        "status": "READY_FOR_DISPENSING",
-        "message": f"Prescription for {req.medication} {req.strength} successfully verified and approved for dispensing.",
-        "audit_event_id": event.id,
-        "audit_hash": event.hash,
-        "verification_summary": {
-            "prescription_verified": True,
-            "medication_available": True,
-            "strength_verified": True,
-            "route_verified": True,
-            "ready_for_dispensing": True,
-        }
-    }
 
-
-@router.post("/api/dashboard/pharmacist/clarification", summary="Pharmacist: Request clarification from prescribing doctor")
+@router.post("/api/dashboard/pharmacist/clarification", summary="Persist a pharmacist clarification request")
 def request_doctor_clarification(
     req: PharmacistClarificationRequest,
+    db: Session = Depends(get_db),
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(require_role(["Clinical Pharmacist"])),
 ):
-    """Logs PHARMACIST_CLARIFICATION_REQUESTED in the SHA-256 cryptographic audit ledger."""
-    actor = current_user.full_name if current_user else "Marcus Vance, PharmD, BCPS"
+    patient = _find_history_patient(db, req.case_id)
+    if patient is None or (req.patient_id is not None and req.patient_id != patient.id):
+        raise HTTPException(status_code=404, detail="Patient record not found.")
+    orders = db.execute(select(Order).where(Order.patient_id == patient.id)).scalars().all()
+    normalized = _normalize_medication_name(req.medication)
+    matches = [order for order in orders if normalized and normalized in _normalize_medication_name(order.drug_name)]
+    if len(matches) != 1:
+        raise HTTPException(status_code=404 if not matches else 409, detail="Order reference is missing or ambiguous.")
     payload = {
-        "case_id": req.case_id,
-        "patient_id": req.patient_id,
-        "patient_name": req.patient_name or f"Case {req.case_id}",
-        "medication": req.medication,
+        "order_id": matches[0].id,
+        "medication": matches[0].drug_name,
         "reason": req.reason,
-        "notes": req.notes or "Doctor clarification requested prior to dispensing.",
+        "notes": req.notes,
         "alternative_suggested": req.alternative_suggested,
-        "pharmacist_name": actor,
-        "verification_status": "AWAITING_DOCTOR_CLARIFICATION",
-        "action_description": f"Clarification requested for {req.medication}: {req.reason}",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
+        "requested_by": current_user.full_name,
     }
-    
-    event = audit_ledger.append_event(
-        actor=actor,
+    event = Event(patient_id=patient.id, event_type="PHARMACIST_CLARIFICATION_REQUESTED", payload=payload)
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    audit_record = audit_ledger.append_event(
+        actor=f"{current_user.full_name} (Clinical Pharmacist)",
         event_type="PHARMACIST_CLARIFICATION_REQUESTED",
-        payload=payload,
+        payload={**payload, "patient_identifier": patient.patient_identifier, "event_id": event.id},
     )
-
     return {
         "status": "AWAITING_DOCTOR_CLARIFICATION",
-        "message": f"Clarification request dispatched to prescribing physician: {req.reason}",
-        "audit_event_id": event.id,
-        "audit_hash": event.hash,
+        "message": "Clarification request persisted for clinician review.",
+        "event_id": event.id,
+        "audit_hash": audit_record.hash,
     }
 
 
-# =========================================================================
 # COMPLETE PATIENT MEDICAL HISTORY API ENDPOINTS
 # =========================================================================
 
-@router.get("/api/dashboard/patient-history/{identifier}", summary="Get Full Patient Medical History")
-@router.get("/api/patient-history/{identifier}", summary="Get Full Patient Medical History")
+def _patient_history_record(db: Session, patient: Patient) -> Dict[str, Any]:
+    """Build a patient history exclusively from persisted records for that patient."""
+    medications = db.execute(
+        select(Medication).where(Medication.patient_id == patient.id).order_by(Medication.id)
+    ).scalars().all()
+    labs = db.execute(
+        select(Lab).where(Lab.patient_id == patient.id).order_by(desc(Lab.measured_at), desc(Lab.id))
+    ).scalars().all()
+    orders = db.execute(
+        select(Order).where(Order.patient_id == patient.id).order_by(desc(Order.ordered_at), desc(Order.id))
+    ).scalars().all()
+    findings = db.execute(
+        select(Finding).where(Finding.patient_id == patient.id).order_by(desc(Finding.created_at), desc(Finding.id))
+    ).scalars().all()
+    events = db.execute(
+        select(Event).where(Event.patient_id == patient.id).order_by(desc(Event.created_at), desc(Event.id))
+    ).scalars().all()
+    requests = db.execute(
+        select(SubstitutionRequest).where(SubstitutionRequest.patient_id == patient.id)
+        .order_by(desc(SubstitutionRequest.created_at), desc(SubstitutionRequest.id))
+    ).scalars().all()
+
+    age = None
+    if patient.date_of_birth:
+        today = datetime.utcnow().date()
+        age = today.year - patient.date_of_birth.year - ((today.month, today.day) < (patient.date_of_birth.month, patient.date_of_birth.day))
+    allergy = (patient.allergy_information or "").strip()
+    medication_rows = [{
+        "medication": medication.drug_name,
+        "strength": " ".join(part for part in (medication.dose, medication.dose_unit) if part),
+        "route": medication.route,
+        "start_date": medication.start_date.isoformat() if medication.start_date else None,
+        "end_date": medication.end_date.isoformat() if medication.end_date else None,
+        "status": medication.status or "Not recorded",
+        "prescribing_doctor": None,
+    } for medication in medications]
+    lab_rows = [{
+        "date": lab.measured_at.isoformat() if lab.measured_at else (lab.created_at.isoformat() if lab.created_at else None),
+        "test": lab.test_name,
+        "result": lab.value,
+        "unit": lab.unit,
+        "reference_range": lab.reference_range,
+        "status": "Not assessed",
+        "lab_id": lab.id,
+    } for lab in labs]
+    assessment_rows = [{
+        "date": finding.created_at.isoformat() if finding.created_at else None,
+        "assessment": finding.title,
+        "risk_level": finding.severity,
+        "recommendation": finding.action,
+        "doctor": "Not recorded",
+        "description": finding.description,
+    } for finding in findings]
+    pharmacy_rows = [{
+        "medication": db.get(Order, request.order_id).drug_name if db.get(Order, request.order_id) else "Not recorded",
+        "availability": "Not tracked",
+        "substitution_request": f"{request.suggested_brand}: {request.reason}",
+        "doctor_verification": request.status,
+        "dispensing_status": "Not tracked",
+        "date": request.created_at.isoformat() if request.created_at else None,
+        "recorded_date": None,
+        "order_id": request.order_id,
+        "suggested_brand": request.suggested_brand,
+        "status": request.status,
+        "reason": request.reason,
+        "decided_at": request.decided_at.isoformat() if request.decided_at else None,
+    } for request in requests]
+    timeline = []
+    if patient.created_at:
+        timeline.append({
+            "date": patient.created_at.isoformat(),
+            "event": f"Patient registered: {patient.name}",
+            "actor": "Not recorded",
+            "badge": "REGISTRATION",
+        })
+    for medication in medications:
+        dose_str = f" ({medication.dose} {medication.dose_unit})".strip() if medication.dose else ""
+        timeline.append({
+            "date": medication.start_date.isoformat() if medication.start_date else (medication.created_at.isoformat() if getattr(medication, "created_at", None) else None),
+            "event": f"Medication therapy recorded: {medication.drug_name}{dose_str}",
+            "actor": "Not recorded",
+            "badge": "MEDICATION",
+        })
+    for event in events:
+        payload = event.payload if isinstance(event.payload, dict) else {}
+        timeline.append({
+            "date": event.created_at.isoformat() if event.created_at else None,
+            "event": event.event_type.replace("_", " ").title(),
+            "actor": payload.get("recorded_by") or payload.get("actor") or "Not recorded",
+            "badge": event.event_type,
+        })
+    for lab in labs:
+        timeline.append({"date": lab.measured_at.isoformat() if lab.measured_at else None, "event": f"{lab.test_name} recorded", "actor": "Not recorded", "badge": "LAB"})
+    for finding in findings:
+        timeline.append({"date": finding.created_at.isoformat() if finding.created_at else None, "event": finding.title, "actor": "Not recorded", "badge": "CLINICAL"})
+    for order in orders:
+        timeline.append({"date": order.ordered_at.isoformat() if order.ordered_at else None, "event": f"Prescription order: {order.drug_name} ({order.status or 'status not recorded'})", "actor": "Not recorded", "badge": "PRESCRIPTION"})
+    timeline.sort(key=lambda row: row["date"] or "", reverse=True)
+
+    return {
+        "case_id": patient.patient_identifier,
+        "patient_identifier": patient.patient_identifier,
+        "patient_id": patient.id,
+        "patient_name": patient.name,
+        "name": patient.name,
+        "mrn": None,
+        "age": age,
+        "sex": patient.sex,
+        "blood_group": None,
+        "allergies_summary": allergy or "Not recorded",
+        "conditions_summary": "Not recorded",
+        "last_updated": patient.created_at.isoformat() if patient.created_at else None,
+        "timeline": timeline,
+        "medical_conditions": [],
+        "medication_history": medication_rows,
+        "allergies": ([{"allergen": allergy, "reaction": "Not recorded", "severity": "Not recorded"}] if allergy else []),
+        "laboratory_history": lab_rows,
+        "clinical_assessments": assessment_rows,
+        "pharmacy_events": pharmacy_rows,
+        "audit_events": [{
+            "timestamp": event.created_at.isoformat() if event.created_at else None,
+            "user_role": (event.payload or {}).get("recorded_by", "Not recorded") if isinstance(event.payload, dict) else "Not recorded",
+            "action": event.event_type.replace("_", " ").title(),
+            "event_type": event.event_type,
+            "audit_hash": None,
+            "event_id": event.id,
+        } for event in events],
+    }
+
+
+def _find_history_patient(db: Session, identifier: str) -> Optional[Patient]:
+    value = str(identifier).strip()
+    if value.isdigit():
+        return db.get(Patient, int(value))
+    return db.execute(select(Patient).where(Patient.patient_identifier == value)).scalar_one_or_none()
+
+
+@router.get("/api/dashboard/patient-history/{identifier}", summary="Get persisted Patient Medical History")
+@router.get("/api/patient-history/{identifier}", summary="Get persisted Patient Medical History")
 def get_patient_medical_history_endpoint(
     identifier: str,
-    audit_ledger: AuditLedger = Depends(get_audit_ledger),
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"])),
 ):
-    """
-    Returns complete, deterministic medical history for the specified patient / case:
-    - Demographics Header
-    - Chronological Patient Timeline
-    - 1. Medical Conditions
-    - 2. Medication History
-    - 3. Allergies
-    - 4. Laboratory History (with link to local source)
-    - 5. Clinical Assessments
-    - 6. Pharmacy Events
-    - 7. Audit Events
-    """
-    history = _get_patient_medical_history(identifier)
-    
-    # Also attach any fresh audit ledger events associated with this patient/case
-    all_events = audit_ledger.get_events()
-    matching_audit = []
-    clean_id = str(identifier).upper()
-    for e in reversed(all_events):
-        p = e.payload if isinstance(e.payload, dict) else {}
-        case_val = str(p.get("case_id", "")).upper()
-        pt_val = str(p.get("patient_name", "")).upper()
-        pt_id = str(p.get("patient_id", ""))
-        if clean_id in case_val or clean_id in pt_val or clean_id == pt_id or clean_id in str(e.actor).upper():
-            matching_audit.append({
-                "timestamp": e.timestamp,
-                "user_role": e.actor,
-                "action": str(p.get("action_description") or p.get("action") or e.event_type.replace("_", " ").title()),
-                "event_type": e.event_type,
-                "audit_hash": e.hash,
-            })
-
-    if matching_audit:
-        seen_hashes = {a.get("audit_hash") for a in history.get("audit_events", [])}
-        for ma in matching_audit:
-            if ma["audit_hash"] not in seen_hashes:
-                history.setdefault("audit_events", []).insert(0, ma)
-                seen_hashes.add(ma["audit_hash"])
-
-    return history
+    patient = _find_history_patient(db, identifier)
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found.")
+    return _patient_history_record(db, patient)
 
 
-@router.get("/api/patient-history", summary="List All Patient Medical History Profiles")
+@router.get("/api/patient-history", summary="List persisted Patient Medical Histories")
 def list_patient_medical_histories(
+    db: Session = Depends(get_db),
     current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"])),
 ):
-    """Returns list of deterministic presentation patient profiles."""
-    return list(DETERMINISTIC_PATIENT_HISTORIES.values())
+    patients = db.execute(select(Patient).order_by(Patient.id)).scalars().all()
+    return [_patient_history_record(db, patient) for patient in patients]
 
 
 # =========================================================================
@@ -1709,7 +959,7 @@ def _categorize_audit_record(event_type: str, payload: Dict[str, Any]) -> Dict[s
 def get_admin_dashboard_data(
     db: Session = Depends(get_db),
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(require_role(["Administrator"])),
 ):
     """Provides system health, cryptographic audit chain verification, and SMS provider gateway controls."""
     verification = audit_ledger.verify_chain()
@@ -1736,25 +986,51 @@ def get_admin_dashboard_data(
             "hash": e.hash,
             "hash_short": e.hash[:12] + "...",
             "payload": p_dict,
-            "is_chain_valid": True,
+            "is_chain_valid": verification.is_valid,
+            "patient_identifier": p_dict.get("patient_identifier") or p_dict.get("case_id"),
         })
 
     users = db.execute(select(User).order_by(User.id)).scalars().all()
     sessions = db.execute(select(UserSession).where(UserSession.is_active == True).order_by(desc(UserSession.id)).limit(10)).scalars().all()
+    patients = db.execute(
+        select(Patient)
+        .options(selectinload(Patient.medications), selectinload(Patient.findings))
+        .order_by(Patient.id)
+    ).scalars().all()
+    patient_records = []
+    severity_rank = {"CRITICAL": 4, "MAJOR": 3, "HIGH": 3, "MODERATE": 2, "MINOR": 1, "LOW": 1}
+    for patient in patients:
+        findings = sorted(patient.findings, key=lambda row: row.created_at or datetime.min, reverse=True)
+        medications = [row for row in patient.medications if (row.status or "").lower() == "active"]
+        risk = max(
+            (str(row.severity or "").upper() for row in findings),
+            key=lambda value: severity_rank.get(value, 0),
+            default="NOT_RECORDED",
+        )
+        patient_records.append({
+            "patient_identifier": patient.patient_identifier,
+            "name": patient.name,
+            "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
+            "sex": patient.sex,
+            "department": None,
+            "latest_finding": findings[0].title if findings else None,
+            "active_medications": [row.drug_name for row in medications],
+            "risk": risk,
+        })
 
     providers = list_available_providers()
     active_prov = get_sms_provider()
 
     return {
         "role": "Administrator",
-        "admin_name": current_user.full_name if current_user else "Arthur Pendelton, MS, CPHIMS",
+        "admin_name": current_user.full_name,
         "system_health": {
-            "status": "OPERATIONAL",
-            "offline_mode": "100% OFFLINE / ON-PREMISE",
-            "zero_external_calls": True,
-            "database_engine": "SQLite WAL Mode (ACID)",
+            "status": "CONNECTED",
+            "offline_mode": "Not reported",
+            "zero_external_calls": "Not monitored",
+            "database_engine": db.get_bind().dialect.name,
             "rule_engine": "Deterministic Priority Safety Engine",
-            "ollama_local_status": "Ready on localhost:11434 (Qwen 2.5 7B)",
+            "ollama_local_status": "Not monitored",
         },
         "audit_chain": {
             "is_valid": verification.is_valid,
@@ -1768,4 +1044,5 @@ def get_admin_dashboard_data(
         },
         "users_count": len(users),
         "active_sessions_count": len(sessions),
+        "patients": patient_records,
     }

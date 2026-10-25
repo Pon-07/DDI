@@ -34,20 +34,25 @@ AuthBase.metadata.create_all(bind=engine)
 # Create the new workflow table without altering existing clinical tables.
 SubstitutionRequest.__table__.create(bind=engine, checkfirst=True)
 
+from sqlalchemy import inspect
+
 with engine.begin() as conn:
-    cols = [
-        row[1]
-        for row in conn.execute(text("PRAGMA table_info(users)")).fetchall()
-    ]
-    if cols:
-        if "totp_secret" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64)"))
-        if "totp_enabled" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN DEFAULT 0"))
-        if "totp_last_verified_at" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN totp_last_verified_at DATETIME"))
-        if "totp_last_timestep" not in cols:
-            conn.execute(text("ALTER TABLE users ADD COLUMN totp_last_timestep INTEGER"))
+    inspector = inspect(conn)
+    tables = inspector.get_table_names()
+    if "users" in tables:
+        cols = {col["name"] for col in inspector.get_columns("users")}
+        if cols:
+            is_pg = conn.dialect.name == "postgresql"
+            if "totp_secret" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(64)"))
+            if "totp_enabled" not in cols:
+                default_val = "FALSE" if is_pg else "0"
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN DEFAULT {default_val}"))
+            if "totp_last_verified_at" not in cols:
+                col_type = "TIMESTAMP" if is_pg else "DATETIME"
+                conn.execute(text(f"ALTER TABLE users ADD COLUMN totp_last_verified_at {col_type}"))
+            if "totp_last_timestep" not in cols:
+                conn.execute(text("ALTER TABLE users ADD COLUMN totp_last_timestep INTEGER"))
 
 
 app = FastAPI(

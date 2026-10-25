@@ -8,10 +8,10 @@ from sqlalchemy.pool import StaticPool
 from agents.audit.ledger import AuditLedger
 from app.main import app
 from database.database import Base, get_db
-from engine.auth.models import AuthBase
+from engine.auth.models import AuthBase, User
 from engine.auth.providers.local import LocalDemoOTPProvider
 from engine.auth.service import AuthService
-from models import Lab, Medication, Order, Patient
+from models import Event, Lab, Medication, Order, Patient
 from tests.test_client import LocalTestClient
 
 
@@ -145,12 +145,13 @@ class TestRoleDashboards(unittest.TestCase):
         self.assertIn("medications_held", stats)
         self.assertIn("vitals_recorded", stats)
         self.assertIn("attention_required", stats)
-        self.assertGreater(stats["medications_due"], 0)
-        self.assertGreater(stats["medications_administered"], 0)
+        self.assertEqual(stats["medications_due"], 0)
+        self.assertEqual(stats["medications_administered"], 0)
 
         # Verify MAR Schedule is populated with case-linked records
         self.assertIn("mar_schedule", data)
-        self.assertGreaterEqual(len(data["mar_schedule"]), 10)
+        self.assertEqual(len(data["mar_schedule"]), 3)
+        self.assertFalse(data["mar_schedule_available"])
         
         # Check specific MAR record properties
         first_mar = data["mar_schedule"][0]
@@ -159,11 +160,11 @@ class TestRoleDashboards(unittest.TestCase):
         self.assertIn("dose", first_mar)
         self.assertIn("scheduled_time", first_mar)
         self.assertIn("status", first_mar)
-        self.assertIn("prescribing_doctor", first_mar)
+        self.assertIsNone(first_mar["scheduled_time"])
 
         # Verify Inpatient Vitals / Labs section is populated
         self.assertIn("vitals_labs", data)
-        self.assertGreaterEqual(len(data["vitals_labs"]), 10)
+        self.assertEqual(len(data["vitals_labs"]), 3)
         first_vital = data["vitals_labs"][0]
         self.assertEqual(first_vital["patient_name"], "Sarah Jenkins")
         self.assertIn("parameter", first_vital)
@@ -174,8 +175,11 @@ class TestRoleDashboards(unittest.TestCase):
     def test_nurse_mar_action_workflow(self):
         """Verify Nurse marking medication administered or held records cryptographic audit event."""
         # 1. Nurse records medication administration
+        nurse_user = self.db.query(User).filter_by(role="Nurse").first()
+        self.current_user = nurse_user
+        medication = self.db.query(Medication).filter(Medication.patient_id == self.db.query(Patient).filter_by(patient_identifier="DEMO-PT-001").first().id).first()
         admin_payload = {
-            "mar_id": "MAR-001",
+            "mar_id": f"MED-{medication.id}",
             "action": "ADMINISTERED",
             "nurse_name": "Elena Rostova, RN",
             "notes": "Administered 2.5 mg PO per morning schedule."
@@ -184,12 +188,13 @@ class TestRoleDashboards(unittest.TestCase):
         self.assertEqual(res_admin.status_code, 200)
         admin_data = res_admin.json()
         self.assertEqual(admin_data["status"], "ADMINISTERED")
+        self.assertEqual(self.db.query(Event).filter_by(event_type="MEDICATION_ADMINISTERED").count(), 1)
         self.assertIn("audit_hash", admin_data)
         self.assertEqual(len(admin_data["audit_hash"]), 64)
 
         # 2. Nurse records medication hold due to clinical alert
         hold_payload = {
-            "mar_id": "MAR-003",
+            "mar_id": "MED-" + str(self.db.query(Medication).filter(Medication.patient_id == self.db.query(Patient).filter_by(patient_identifier="DEMO-PT-002").first().id).first().id),
             "action": "HELD",
             "nurse_name": "Elena Rostova, RN",
             "hold_reason": "INR elevated at 3.4; held pending physician order review.",
@@ -204,8 +209,9 @@ class TestRoleDashboards(unittest.TestCase):
 
     def test_nurse_record_vital_workflow(self):
         """Verify Nurse recording bedside vitals/POC labs evaluates thresholds and logs audit event."""
+        self.current_user = self.db.query(User).filter_by(role="Nurse").first()
         vital_payload = {
-            "case_id": "CASE-001",
+            "case_id": "DEMO-PT-001",
             "patient_name": "Sarah Jenkins",
             "parameter": "Blood Pressure",
             "value": "132/84",
@@ -218,7 +224,8 @@ class TestRoleDashboards(unittest.TestCase):
         self.assertEqual(data["status"], "RECORDED")
         self.assertIn("audit_hash", data)
         self.assertEqual(len(data["audit_hash"]), 64)
-        self.assertEqual(data["record"]["status"], "Normal")
+        self.assertEqual(data["record"]["status"], "RECORDED")
+        self.assertEqual(self.db.query(Lab).filter_by(test_name="Blood Pressure").count(), 1)
 
     def test_pharmacist_dashboard_data(self):
         """Verify Pharmacist dashboard returns Medication Fulfillment & Substitution metrics, availability queue, and local inventory."""
@@ -242,7 +249,8 @@ class TestRoleDashboards(unittest.TestCase):
 
         # Verify Availability Queue
         self.assertIn("availability_queue", data)
-        self.assertGreaterEqual(len(data["availability_queue"]), 4)
+        self.assertEqual(len(data["availability_queue"]), 1)
+        self.assertFalse(data["inventory_available"])
         first_item = data["availability_queue"][0]
         self.assertIn("patient_id", first_item)
         self.assertIn("patient_name", first_item)
@@ -254,28 +262,26 @@ class TestRoleDashboards(unittest.TestCase):
 
         # Verify Local Inventory and Secondary Reference
         self.assertIn("local_inventory", data)
-        self.assertGreaterEqual(len(data["local_inventory"]), 10)
+        self.assertEqual(data["local_inventory"], [])
         self.assertIn("pharmacology_reference", data)
 
     def test_pharmacist_dispense_workflow(self):
-        """Verify marking an available medication ready for dispensing logs PHARMACIST_PRESCRIPTION_VERIFIED in audit ledger."""
+        """Prevent a dispense-ready state when inventory is not persisted."""
+        self.current_user = self.pharmacist_user
         payload = {
-            "case_id": "CASE-001",
-            "patient_identifier": "DEMO-PT-001",
-            "patient_name": "Sarah Jenkins",
-            "medication": "Warfarin (Coumadin)",
-            "strength": "2.5 mg",
+            "case_id": "DEMO-PT-002",
+            "patient_id": self.db.query(Patient).filter_by(patient_identifier="DEMO-PT-002").first().id,
+            "patient_identifier": "DEMO-PT-002",
+            "patient_name": "Robert Chen",
+            "medication": "Enoxaparin Sodium (Lovenox)",
+            "strength": "80 mg / 0.8 mL",
             "formulation": "Tablet",
             "quantity": 30,
             "pharmacist_notes": "Stock verified in Bin A-04 (420 tabs available). Ready for dispensing."
         }
         res = self.client.post("/api/dashboard/pharmacist/dispense", json=payload)
-        self.assertEqual(res.status_code, 200)
-        data = res.json()
-        self.assertEqual(data["status"], "READY_FOR_DISPENSING")
-        self.assertIn("audit_hash", data)
-        self.assertIn("verification_summary", data)
-        self.assertTrue(data["verification_summary"]["ready_for_dispensing"])
+        self.assertEqual(res.status_code, 409)
+        self.assertIn("Inventory is not tracked", res.json()["detail"])
 
     def test_pharmacist_brand_substitution_request_and_doctor_approval_workflow(self):
         """Verify end-to-end brand substitution workflow: pharmacist suggest to doctor -> doctor approves -> ready for dispensing."""
@@ -314,15 +320,15 @@ class TestRoleDashboards(unittest.TestCase):
 
     def test_patient_medical_history_endpoint(self):
         """Verify longitudinal Patient Medical History returns header, timeline, and 7 discrete clinical sections."""
-        res = self.client.get("/api/dashboard/patient-history/CASE-001")
+        res = self.client.get("/api/dashboard/patient-history/DEMO-PT-001")
         self.assertEqual(res.status_code, 200)
         data = res.json()
 
         # Demographics Header
-        self.assertEqual(data["case_id"], "CASE-001")
+        self.assertEqual(data["case_id"], "DEMO-PT-001")
         self.assertEqual(data["patient_name"], "Sarah Jenkins")
         self.assertIn("timeline", data)
-        self.assertGreaterEqual(len(data["timeline"]), 3)
+        self.assertGreaterEqual(len(data["timeline"]), 2)
 
         # 7 Required Sections
         self.assertIn("medical_conditions", data)
@@ -342,6 +348,7 @@ class TestRoleDashboards(unittest.TestCase):
 
     def test_admin_dashboard_data(self):
         """Verify Admin dashboard returns audit chain integrity, users, and gateway status."""
+        self.current_user = self.db.query(User).filter(User.role == "Administrator").first()
         res = self.client.get("/api/dashboard/admin")
         self.assertEqual(res.status_code, 200)
         data = res.json()

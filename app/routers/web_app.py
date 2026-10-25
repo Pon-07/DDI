@@ -1452,40 +1452,10 @@ def get_micromedx_console_html():
               </div>
             </div>
             <p style="font-size:0.84rem; color:var(--text-secondary); margin-bottom:0.75rem;">
-              Evaluate verified clinical scenarios with drug interactions and lab evidence:
+              Patients and clinical evidence below are loaded from persisted records. No sample cases are shown.
             </p>
-
-            <div style="margin-bottom:0.65rem; padding:0.85rem 1rem; background:var(--bg-surface); border-radius:var(--radius-md); border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
-              <div>
-                <button type="button" class="btn-link" onclick="openPatientHistoryModal('CASE-001')"><strong>1. Sarah Jenkins (CASE-001)</strong></button>
-                <div style="font-size:0.78rem; color:var(--text-muted);">Warfarin + Fluconazole • INR 3.4 (High)</div>
-              </div>
-              <div style="display:flex; gap:0.35rem;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openLabSourceModal('LAB-2026-0001')">View Lab</button>
-                <button type="button" class="btn btn-primary btn-sm" id="btn-demo-1" onclick="executeScenarioAsync(1, event)">Evaluate</button>
-              </div>
-            </div>
-
-            <div style="margin-bottom:0.65rem; padding:0.85rem 1rem; background:var(--bg-surface); border-radius:var(--radius-md); border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
-              <div>
-                <button type="button" class="btn-link" onclick="openPatientHistoryModal('CASE-002')"><strong>2. Robert Chen (CASE-002)</strong></button>
-                <div style="font-size:0.78rem; color:var(--text-muted);">Enoxaparin + Renal Decline • Cr 2.4 mg/dL</div>
-              </div>
-              <div style="display:flex; gap:0.35rem;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openLabSourceModal('LAB-2026-0002')">View Lab</button>
-                <button type="button" class="btn btn-primary btn-sm" id="btn-demo-2" onclick="executeScenarioAsync(2, event)">Evaluate</button>
-              </div>
-            </div>
-
-            <div style="margin-bottom:0.65rem; padding:0.85rem 1rem; background:var(--bg-surface); border-radius:var(--radius-md); border:1px solid var(--border-subtle); display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
-              <div>
-                <button type="button" class="btn-link" onclick="openPatientHistoryModal('CASE-003')"><strong>3. Elena Rostova (CASE-003)</strong></button>
-                <div style="font-size:0.78rem; color:var(--text-muted);">Duplicate ACE-I • K+ 5.3 mEq/L</div>
-              </div>
-              <div style="display:flex; gap:0.35rem;">
-                <button type="button" class="btn btn-secondary btn-sm" onclick="openLabSourceModal('LAB-2026-0003')">View Lab</button>
-                <button type="button" class="btn btn-primary btn-sm" id="btn-demo-3" onclick="executeScenarioAsync(3, event)">Evaluate</button>
-              </div>
+            <div id="doctor-patient-records-container">
+              <div style="padding:1rem; color:var(--text-muted);">Loading persisted patient records…</div>
             </div>
           </div>
 
@@ -1499,11 +1469,7 @@ def get_micromedx_console_html():
             <form onsubmit="event.preventDefault(); submitSandboxPrescriptionAsync(); return false;">
               <div class="form-group">
                 <label class="form-label" for="sandbox-patient-select">Patient</label>
-                <select id="sandbox-patient-select" class="form-input">
-                  <option value="1">Sarah Jenkins (CASE-001 - Warfarin)</option>
-                  <option value="2">Robert Chen (CASE-002 - Enoxaparin)</option>
-                  <option value="3">Elena Rostova (CASE-003 - Lisinopril)</option>
-                </select>
+                <select id="sandbox-patient-select" class="form-input"><option value="">Choose a persisted patient</option></select>
               </div>
               <div class="form-group" style="position:relative;">
                 <label class="form-label" for="sandbox-drug-search">Medication to Prescribe</label>
@@ -1667,12 +1633,7 @@ def get_micromedx_console_html():
             <form onsubmit="event.preventDefault(); submitRecordVitalAsync(); return false;" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)) auto; gap:0.75rem; align-items:flex-end;">
               <div>
                 <label class="form-label" for="nurse-vital-patient-select" style="font-size:0.75rem;">Patient</label>
-                <select id="nurse-vital-patient-select" class="form-input" style="padding:0.45rem 0.65rem; font-size:0.84rem;">
-                  <option value="CASE-001|Sarah Jenkins">Sarah Jenkins (CASE-001)</option>
-                  <option value="CASE-002|Robert Chen">Robert Chen (CASE-002)</option>
-                  <option value="CASE-003|Elena Rostova">Elena Rostova (CASE-003)</option>
-                  <option value="CASE-004|Arthur Pendelton">Arthur Pendelton (CASE-004)</option>
-                </select>
+                <select id="nurse-vital-patient-select" class="form-input" style="padding:0.45rem 0.65rem; font-size:0.84rem;"><option value="">Choose a persisted patient</option></select>
               </div>
               <div>
                 <label class="form-label" for="nurse-vital-param-select" style="font-size:0.75rem;">Parameter</label>
@@ -1988,11 +1949,7 @@ def get_micromedx_console_html():
             <div style="display:flex; gap:0.5rem; flex:1; max-width:420px;">
               <select id="admin-patient-dept-filter" class="form-input" onchange="onFilterPatientDept(this.value)" style="max-width:150px;">
                 <option value="ALL">All Depts</option>
-                <option value="Cardiology">Cardiology</option>
-                <option value="Oncology">Oncology</option>
-                <option value="ICU">ICU</option>
-                <option value="Nephrology">Nephrology</option>
-                <option value="Internal Med">Internal Med</option>
+                <option value="Not recorded">Department not recorded</option>
               </select>
               <input type="text" class="form-input" id="search-patient-input" placeholder="Search patient name, ID or condition..." oninput="onSearchPatientDirectory(this.value)">
             </div>
@@ -2091,10 +2048,10 @@ def get_micromedx_console_html():
           <div>
             <div style="display:flex; align-items:center; gap:0.5rem;">
               <span style="font-size:1.15rem; font-weight:800; color:var(--text-primary);">Medication Availability Check</span>
-              <span class="badge badge-info" id="avail-modal-case-badge">CASE-001</span>
+              <span class="badge badge-info" id="avail-modal-case-badge">No patient selected</span>
             </div>
             <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;" id="avail-modal-patient-header">
-              Sarah Jenkins (64F) • MRN-2026-9041
+              Patient details load from the selected persisted order.
             </div>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="closeMedicationAvailabilityModal()">✕ Close</button>
@@ -2118,7 +2075,7 @@ def get_micromedx_console_html():
         <div class="modal-header">
           <div>
             <div style="font-size:1.1rem; font-weight:800; color:var(--text-primary);">REQUEST FOR PRESCRIPTION SUBSTITUTION</div>
-            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;" id="sub-modal-patient-header">Patient: Case-002 (Robert Chen)</div>
+            <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.2rem;" id="sub-modal-patient-header">Patient details load from the selected persisted order.</div>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="closeSubstitutionRequestModal()">✕</button>
         </div>
@@ -2253,7 +2210,7 @@ def get_micromedx_console_html():
         <div class="modal-body">
           <div style="background:var(--bg-surface); border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:0.85rem 1rem; margin-bottom:1rem; display:grid; grid-template-columns:repeat(auto-fit, minmax(180px, 1fr)); gap:0.6rem; font-size:0.82rem;">
             <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Report ID:</span> <strong id="lab-source-id" style="color:var(--clinical-blue); font-family:var(--font-mono);">LAB-2026-0001</strong></div>
-            <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Patient / Case:</span> <strong id="lab-source-patient">Sarah Jenkins</strong></div>
+            <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Patient / Case:</span> <strong id="lab-source-patient">Not recorded</strong></div>
             <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Collection Date:</span> <span id="lab-source-collected">08 Oct 2026 08:30 UTC</span></div>
             <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Panel Category:</span> <strong id="lab-source-category">Coagulation Panel</strong></div>
           </div>
@@ -2292,7 +2249,7 @@ def get_micromedx_console_html():
         <div class="modal-header">
           <div>
             <div style="font-size:1.15rem; font-weight:800; color:var(--text-primary);" id="mar-modal-title">Medication Administration Record</div>
-            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.2rem;" id="mar-modal-patient-header">Patient: Sarah Jenkins (CASE-001)</div>
+            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.2rem;" id="mar-modal-patient-header">Patient details load from persisted medication records.</div>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="closeMARDetailModal()">✕</button>
         </div>
@@ -2315,7 +2272,7 @@ def get_micromedx_console_html():
         <div class="modal-header">
           <div>
             <div style="font-size:1.15rem; font-weight:800; color:var(--text-primary);" id="vital-modal-title">Inpatient Vital &amp; Parameter Details</div>
-            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.2rem;" id="vital-modal-patient-header">Patient: Sarah Jenkins (CASE-001)</div>
+            <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.2rem;" id="vital-modal-patient-header">Patient details load from persisted laboratory records.</div>
           </div>
           <button type="button" class="btn btn-secondary btn-sm" onclick="closeVitalDetailModal()">✕</button>
         </div>
@@ -2371,108 +2328,9 @@ def get_micromedx_console_html():
       }
     };
 
-    // =========================================================================
-    // 2. 265 ENTERPRISE PATIENTS GENERATOR
-    // =========================================================================
-    const SYNTHETIC_PATIENTS = generateSyntheticPatients(265);
+    let adminPatientRecords = [];
 
-    function generateSyntheticPatients(totalCount) {
-      const firstNames = ["Sarah", "Robert", "Elena", "Arthur", "David", "Emily", "Michael", "Karen", "James", "Jennifer", "William", "Elizabeth", "Thomas", "Jessica", "Charles", "Ashley"];
-      const lastNames = ["Jenkins", "Chen", "Rostova", "Pendelton", "Sterling", "Zhang", "Mercer", "Davis", "Vance", "Taylor", "Smith", "Johnson", "Williams", "Miller", "Garcia", "Martinez"];
-      const depts = ["Cardiology", "Nephrology", "Internal Med", "ICU", "Oncology", "Surgery"];
-      const conditions = [
-        "Non-valvular Atrial Fibrillation", "Stage 3B Chronic Kidney Disease", "Essential Hypertension Stage II",
-        "Congestive Heart Failure", "Acute Coronary Syndrome", "Deep Vein Thrombosis", "Type 2 Diabetes Mellitus"
-      ];
-      const regimens = [
-        "Warfarin 2.5mg PO Daily", "Enoxaparin 80mg SC Daily", "Lisinopril 20mg PO Daily",
-        "Digoxin 0.125mg PO Daily", "Amlodipine 5mg PO Daily", "Atorvastatin 20mg PO Daily"
-      ];
-      const risks = ["Critical", "High", "Moderate", "Low"];
-      const clinicians = ["Dr. Sarah Lin, MD", "Dr. David Sterling, MD", "Dr. Alan Mercer, MD", "Dr. Emily Zhang, MD"];
-
-      const list = [];
-      list.push({ id: "CASE-001", name: "Sarah Jenkins", age: 64, sex: "F", dept: "Cardiology", condition: "Atrial Fibrillation w/ Rising INR", regimen: "Warfarin 2.5mg PO Daily", risk: "Critical", clinician: "Dr. Sarah Lin, MD" });
-      list.push({ id: "CASE-002", name: "Robert Chen", age: 72, sex: "M", dept: "Nephrology", condition: "DVT w/ Renal Decline (Cr 2.4)", regimen: "Enoxaparin 80mg SC Daily", risk: "Critical", clinician: "Dr. Sarah Lin, MD" });
-      list.push({ id: "CASE-003", name: "Elena Rostova", age: 58, sex: "F", dept: "Internal Med", condition: "Essential Hypertension Stage II", regimen: "Lisinopril 20mg PO Daily", risk: "High", clinician: "Dr. Sarah Lin, MD" });
-      list.push({ id: "CASE-004", name: "Arthur Pendelton", age: 79, sex: "M", dept: "Cardiology", condition: "Congestive Heart Failure & AF", regimen: "Digoxin 0.125mg PO Daily", risk: "Critical", clinician: "Dr. Sarah Lin, MD" });
-
-      for (let i = 5; i <= totalCount; i++) {
-        const id = "PT-" + String(i).padStart(3, '0');
-        list.push({
-          id,
-          name: `${firstNames[i % firstNames.length]} ${lastNames[(i * 3) % lastNames.length]}`,
-          age: 30 + ((i * 7) % 55),
-          sex: i % 2 === 0 ? "M" : "F",
-          dept: depts[i % depts.length],
-          condition: conditions[i % conditions.length],
-          regimen: regimens[i % regimens.length],
-          risk: risks[i % risks.length],
-          clinician: clinicians[i % clinicians.length]
-        });
-      }
-      return list;
-    }
-
-    // =========================================================================
-    // 3. SYNTHETIC AUDIT LEDGER DATASET
-    // =========================================================================
-    let SYNTHETIC_AUDIT_LEDGER = generateSyntheticAuditLedger();
-
-    function generateSyntheticAuditLedger() {
-      const records = [];
-      const templates = [
-        { time: "2026-10-08 09:35:10", actor: "Marcus Vance, PharmD", role: "Pharmacist", cat: "VERIFICATION", entity: "Sarah Jenkins (CASE-001)", action: "Prescription Verified & Marked Ready for Dispensing: Warfarin 2.5mg", result: "READY TO DISPENSE ✓" },
-        { time: "2026-10-08 09:20:00", actor: "Dr. Sarah Lin, MD", role: "Doctor", cat: "CLINICAL", entity: "Sarah Jenkins (CASE-001)", action: "Prescription Authorized: Warfarin 2.5 mg PO Daily", result: "PRESCRIBED ✓" },
-        { time: "2026-10-08 11:25:00", actor: "Dr. Sarah Lin, MD", role: "Doctor", cat: "SUBSTITUTION", entity: "Robert Chen (CASE-002)", action: "Doctor Approved Brand Substitution: Lovenox -> Clexane 80 mg", result: "SUBSTITUTION APPROVED ✓" },
-        { time: "2026-10-08 11:20:00", actor: "Marcus Vance, PharmD", role: "Pharmacist", cat: "SUBSTITUTION", entity: "Robert Chen (CASE-002)", action: "Pharmacy Substitution Requested: Clexane 80 mg (Lovenox Unavailable)", result: "DOCTOR APPROVAL PENDING ⏳" },
-        { time: "2026-10-08 11:15:00", actor: "Marcus Vance, PharmD", role: "Pharmacist", cat: "VERIFICATION", entity: "Robert Chen (CASE-002)", action: "Prescription Checked: Lovenox 80 mg UNAVAILABLE in Stock", result: "MEDICATION UNAVAILABLE ⚠️" },
-        { time: "2026-10-08 14:05:00", actor: "Marcus Vance, PharmD", role: "Pharmacist", cat: "VERIFICATION", entity: "Elena Rostova (CASE-003)", action: "Prescription Verified: Lisinopril (Prinivil) 20 mg PO Daily", result: "READY TO DISPENSE ✓" },
-        { time: "2026-10-08 09:40:00", actor: "Dr. Sarah Lin, MD", role: "Doctor", cat: "SAFETY", entity: "Elena Rostova (CASE-003)", action: "Duplicate ACE-I Safety Warning: Deprescribed Enalapril 10 mg", result: "HOLD ENFORCED ⚠️" },
-        { time: "2026-10-08 16:05:00", actor: "Marcus Vance, PharmD", role: "Pharmacist", cat: "VERIFICATION", entity: "Arthur Pendelton (CASE-004)", action: "Prescription Verified: Digoxin (Lanoxin) 0.125 mg PO Daily", result: "READY TO DISPENSE ✓" },
-        { time: "2026-10-08 08:30:00", actor: "Elena Rostova, RN", role: "Nurse", cat: "CLINICAL", entity: "Sarah Jenkins (CASE-001)", action: "Inpatient Lab Released: INR 3.4 High", result: "INGESTED ✓" },
-        { time: "2026-10-08 08:00:00", actor: "Arthur Pendelton", role: "Administrator", cat: "AUDIT", entity: "Audit Ledger", action: "Executed Live SHA-256 Cryptographic Hash Chain Verification", result: "VALID & INTACT ✓" },
-      ];
-
-      let prevHash = "GENESIS_BLOCK_00000000000000000000000000000000";
-      for (let i = 0; i < templates.length; i++) {
-        const item = templates[i];
-        const curHash = generateHash(`${i}:${item.time}:${item.actor}:${item.action}:${prevHash}`);
-        records.push({
-          id: i + 1,
-          timestamp: item.time + " UTC",
-          actor: item.actor,
-          role: item.role,
-          category: item.cat,
-          entity: item.entity,
-          action: item.action,
-          result: item.result,
-          prev_hash: prevHash,
-          current_hash: curHash,
-          payload: {
-            block_id: i + 1,
-            timestamp: item.time + " UTC",
-            actor: item.actor,
-            role: item.role,
-            action: item.action,
-            entity: item.entity,
-            cryptographic_verification: "SHA256_HASH_VALID_INTACT"
-          }
-        });
-        prevHash = curHash;
-      }
-      return records;
-    }
-
-    function generateHash(str) {
-      let hash = 0;
-      for (let i = 0; i < str.length; i++) {
-        hash = ((hash << 5) - hash) + str.charCodeAt(i);
-        hash |= 0;
-      }
-      const hex = Math.abs(hash).toString(16).padStart(8, '0');
-      return hex + "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".slice(hex.length);
-    }
+    let adminAuditRecords = [];
 
     // =========================================================================
     // 4. APPLICATION STATE
@@ -2492,6 +2350,7 @@ def get_micromedx_console_html():
       // Nurse MAR & Vitals
       nurseMARList: [],
       nurseVitalsList: [],
+      nursePatients: [],
       nurseMARFilter: 'ALL',
       activeMARId: null,
       activeVitalId: null,
@@ -2638,6 +2497,30 @@ def get_micromedx_console_html():
         document.getElementById('badge-cosign-count').innerText = `${data.pending_cosigns.length} Pending`;
         const pendingSubstitutions = (data.substitution_requests || []).filter(s => s.status === 'pending').length;
         document.getElementById('badge-doctor-sub-count').innerText = `${pendingSubstitutions} Pending Request${pendingSubstitutions === 1 ? '' : 's'}`;
+
+        const patientContainer = document.getElementById('doctor-patient-records-container');
+        const patients = data.patients || [];
+        patientContainer.innerHTML = patients.length ? patients.map(patient => `
+          <div style="padding:0.75rem 0; border-bottom:1px solid var(--border-subtle);">
+            <button type="button" class="btn-link" data-patient-history="${escapeHtml(patient.patient_identifier || '')}"><strong>${escapeHtml(patient.name || 'Not recorded')}</strong></button>
+            <span class="badge badge-neutral">${escapeHtml(patient.patient_identifier || 'Identifier not recorded')}</span>
+            <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.25rem;">
+              Active medications: ${escapeHtml((patient.active_medications || []).map(m => [m.name, m.dose, m.frequency].filter(Boolean).join(' ')).join('; ') || 'Not recorded')}
+            </div>
+            <div style="font-size:0.78rem; color:var(--text-secondary); margin-top:0.2rem;">
+              Recent labs: ${escapeHtml((patient.recent_labs || []).map(lab => `${lab.test}: ${lab.value} ${lab.unit || ''}`.trim()).join('; ') || 'Not recorded')} · Findings: ${Number(patient.active_findings_count || 0)}
+            </div>
+          </div>
+        `).join('') : '<div style="padding:1rem; color:var(--text-muted);">No persisted patient records are available.</div>';
+        patientContainer.querySelectorAll('[data-patient-history]').forEach(button => {
+          button.addEventListener('click', () => openPatientHistoryModal(button.dataset.patientHistory));
+        });
+        const patientSelect = document.getElementById('sandbox-patient-select');
+        if (patientSelect) {
+          patientSelect.innerHTML = '<option value="">Choose a persisted patient</option>' + patients.map(patient =>
+            `<option value="${Number(patient.id)}">${escapeHtml(patient.name || 'Patient')} (${escapeHtml(patient.patient_identifier || 'Identifier not recorded')})</option>`
+          ).join('');
+        }
 
         // Render Doctor Pharmacy Substitution Requests
         const subContainer = document.getElementById('doctor-substitutions-container');
@@ -2795,15 +2678,22 @@ def get_micromedx_console_html():
 
         // Update Summary Stats
         if (data.stats) {
-          document.getElementById('nurse-stat-due').innerText = data.stats.medications_due ?? 0;
+          document.getElementById('nurse-stat-due').innerText = data.mar_schedule_available ? (data.stats.medications_due ?? 0) : '—';
           document.getElementById('nurse-stat-administered').innerText = data.stats.medications_administered ?? 0;
           document.getElementById('nurse-stat-held').innerText = data.stats.medications_held ?? 0;
           document.getElementById('nurse-stat-vitals').innerText = data.stats.vitals_recorded ?? 0;
-          document.getElementById('nurse-stat-attention').innerText = data.stats.attention_required ?? 0;
+          document.getElementById('nurse-stat-attention').innerText = data.stats.attention_required ?? '—';
         }
 
         appState.nurseMARList = data.mar_schedule || [];
         appState.nurseVitalsList = data.vitals_labs || [];
+        const nursePatientSelect = document.getElementById('nurse-vital-patient-select');
+        const selectedPatient = nursePatientSelect.value;
+        appState.nursePatients = data.patients || [];
+        nursePatientSelect.innerHTML = '<option value="">Choose a persisted patient</option>' + (data.patients || []).map(patient =>
+          `<option value="${escapeHtml(patient.patient_identifier || '')}">${escapeHtml(patient.name || 'Patient')} (${escapeHtml(patient.patient_identifier || 'Identifier not recorded')})</option>`
+        ).join('');
+        if ((data.patients || []).some(patient => patient.patient_identifier === selectedPatient)) nursePatientSelect.value = selectedPatient;
 
         renderNurseMARTable();
         renderNurseVitalsTable();
@@ -2825,7 +2715,7 @@ def get_micromedx_console_html():
         list = list.filter(item => (item.status || '').toUpperCase() === 'HELD');
       }
 
-      document.getElementById('badge-nurse-mar-count').innerText = `${list.length} Scheduled Orders`;
+      document.getElementById('badge-nurse-mar-count').innerText = `${list.length} Medication Records`;
 
       if (list.length === 0) {
         tbody.innerHTML = `<tr><td colspan="5" style="text-align:center; padding:2rem; color:var(--text-muted);">No medication administration records match the selected filter.</td></tr>`;
@@ -2843,6 +2733,8 @@ def get_micromedx_console_html():
           badgeHtml = '<span class="badge badge-critical" style="background:#fef2f2; color:#b91c1c; border-color:#fecaca; font-weight:700;">⚠ Held</span>';
         } else if (statusUpper === 'MISSED') {
           badgeHtml = '<span class="badge badge-critical" style="font-weight:700;">! Missed</span>';
+        } else if (statusUpper === 'NOT_RECORDED') {
+          badgeHtml = '<span class="badge badge-neutral">Administration not recorded</span>';
         } else {
           badgeHtml = '<span class="badge badge-neutral">○ Pending</span>';
         }
@@ -2850,15 +2742,15 @@ def get_micromedx_console_html():
         return `
           <tr>
             <td>
-              <button type="button" class="btn-link" onclick="openPatientHistoryModal('${item.case_id}')"><strong>${item.patient_name}</strong></button>
-              <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${item.case_id} &bull; ${item.room || 'Bed 1'}</div>
+              <button type="button" class="btn-link" onclick="openPatientHistoryModal('${escapeHtml(item.patient_identifier || '')}')"><strong>${escapeHtml(item.patient_name || 'Patient not linked')}</strong></button>
+              <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${escapeHtml(item.patient_identifier || '')}</div>
             </td>
             <td>
-              <strong style="color:var(--text-primary); font-size:0.9rem;">${item.medication} ${item.dose}</strong>
-              <div style="font-size:0.75rem; color:var(--text-muted);">${item.route} &bull; Prescriber: ${item.prescribing_doctor}</div>
+              <strong style="color:var(--text-primary); font-size:0.9rem;">${escapeHtml(item.medication || '')} ${escapeHtml(item.dose || '')}</strong>
+              <div style="font-size:0.75rem; color:var(--text-muted);">${escapeHtml(item.route || 'Route not recorded')}</div>
             </td>
             <td>
-              <span style="font-weight:700; font-family:var(--font-mono); color:var(--clinical-blue-dark);">${item.scheduled_time}</span>
+              <span style="font-weight:700; font-family:var(--font-mono); color:var(--clinical-blue-dark);">${item.scheduled_time || 'Not recorded'}</span>
             </td>
             <td>${badgeHtml}</td>
             <td>
@@ -2922,7 +2814,7 @@ def get_micromedx_console_html():
 
         <div style="background:#ffffff; border:1px solid var(--border-subtle); border-radius:var(--radius-md); padding:0.9rem 1.1rem; margin-bottom:0.9rem; font-size:0.84rem;">
           <div style="font-weight:700; color:var(--text-primary); margin-bottom:0.25rem;">Relevant Nursing / Clinical Note:</div>
-          <div style="color:var(--text-secondary); line-height:1.45;">${item.nursing_note || 'Administer according to verified clinical schedule. Recheck vital parameters if required.'}</div>
+          <div style="color:var(--text-secondary); line-height:1.45;">${item.nursing_note || 'No nursing note recorded.'}</div>
         </div>
 
         ${item.clinical_alert ? `
@@ -2947,7 +2839,7 @@ def get_micromedx_console_html():
               <span class="badge badge-success">COMPLETED</span>
             </div>
             <div style="font-size:0.78rem; font-weight:500; color:var(--text-secondary); margin-top:0.3rem;">
-              Administered Time: <strong>${item.administered_time || '08:00 UTC'}</strong> &bull; Recorded By: <strong>${item.administered_by || 'Elena Rostova, RN'}</strong>
+              Administration Time: <strong>${escapeHtml(item.recorded_at || 'Not recorded')}</strong> &bull; Recorded By: <strong>${escapeHtml(item.recorded_by || 'Not recorded')}</strong>
             </div>
           </div>
         ` : ''}
@@ -2962,7 +2854,7 @@ def get_micromedx_console_html():
               Reason for Hold: <span style="color:var(--alert-critical-text);">${item.hold_reason || 'Clinical safety hold enforced.'}</span>
             </div>
             <div style="font-size:0.78rem; color:var(--text-muted); margin-top:0.3rem;">
-              Recorded By: <strong>${item.administered_by || 'Elena Rostova, RN'}</strong> &bull; Timestamp: <strong>${item.administered_time || 'Shift Entry'}</strong>
+              Recorded By: <strong>${escapeHtml(item.recorded_by || 'Not recorded')}</strong> &bull; Timestamp: <strong>${escapeHtml(item.recorded_at || 'Not recorded')}</strong>
             </div>
           </div>
         ` : ''}
@@ -2996,7 +2888,7 @@ def get_micromedx_console_html():
       const item = (appState.nurseMARList || []).find(m => m.id === marId);
       if (!item) return;
 
-      const nurseName = (appState.currentUser && appState.currentUser.full_name) || "Elena Rostova, RN";
+      const nurseName = (appState.currentUser && appState.currentUser.full_name) || "Current nurse";
       let holdReason = "";
       let notes = "";
 
@@ -3023,22 +2915,7 @@ def get_micromedx_console_html():
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Could not record MAR action.');
 
-        // Add to synthetic audit ledger
-        SYNTHETIC_AUDIT_LEDGER.unshift({
-          id: SYNTHETIC_AUDIT_LEDGER.length + 1,
-          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19) + " UTC",
-          actor: nurseName,
-          role: "Nurse",
-          category: "CLINICAL",
-          entity: `${item.patient_name} (${item.case_id})`,
-          action: action === 'ADMINISTERED' 
-            ? `Medication Administered: ${item.medication} ${item.dose} ${item.route}`
-            : `Medication Held: ${item.medication} ${item.dose} (${holdReason || 'Clinical Hold'})`,
-          result: action === 'ADMINISTERED' ? "ADMINISTERED ✓" : "HELD ⚠️",
-          prev_hash: SYNTHETIC_AUDIT_LEDGER[0] ? SYNTHETIC_AUDIT_LEDGER[0].current_hash : "GENESIS_BLOCK",
-          current_hash: data.audit_hash || generateHash(`NURSE_MAR:${item.id}:${Date.now()}`),
-          payload: { mar_id: item.id, medication: item.medication, dose: item.dose, action: action }
-        });
+
 
         alert(`✓ MAR Updated: ${item.medication} marked as ${action}.\nCryptographic Audit Event Sealed: ${(data.audit_hash || 'SHA-256 Validated').slice(0, 20)}...`);
         closeMARDetailModal();
@@ -3072,9 +2949,9 @@ def get_micromedx_console_html():
     async function submitRecordVitalAsync(event) {
       if (event) event.preventDefault();
 
-      const patientCombo = document.getElementById('nurse-vital-patient-select').value.split('|');
-      const caseId = patientCombo[0];
-      const patientName = patientCombo[1];
+      const caseId = document.getElementById('nurse-vital-patient-select').value;
+      const patientRecord = appState.nursePatients.find(patient => patient.patient_identifier === caseId);
+      const patientName = patientRecord ? patientRecord.name : '';
 
       const paramCombo = document.getElementById('nurse-vital-param-select').value.split('|');
       const paramName = paramCombo[0];
@@ -3084,12 +2961,13 @@ def get_micromedx_console_html():
       const btn = document.getElementById('btn-nurse-record-vital');
       const feedback = document.getElementById('nurse-vital-feedback');
 
+      if (!caseId) { alert('Select a persisted patient.'); return; }
       if (!val) { alert('Please enter a vital/lab value.'); return; }
       btn.innerText = 'Recording... ⏳';
       btn.disabled = true;
       if (feedback) feedback.style.display = 'none';
 
-      const nurseName = (appState.currentUser && appState.currentUser.full_name) || "Elena Rostova, RN";
+      const nurseName = (appState.currentUser && appState.currentUser.full_name) || "Current nurse";
 
       try {
         const res = await fetch('/api/dashboard/nurse/record-vital', {
@@ -3107,24 +2985,11 @@ def get_micromedx_console_html():
         const data = await res.json();
         if (!res.ok) throw new Error(data.detail || 'Could not record vital sign.');
 
-        // Add to synthetic audit ledger
-        SYNTHETIC_AUDIT_LEDGER.unshift({
-          id: SYNTHETIC_AUDIT_LEDGER.length + 1,
-          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19) + " UTC",
-          actor: nurseName,
-          role: "Nurse",
-          category: "CLINICAL",
-          entity: `${patientName} (${caseId})`,
-          action: `Vital Sign / Point-of-Care Lab Ingested: ${paramName} = ${val} ${unit}`,
-          result: data.record && (data.record.status === 'Critical' || data.record.status === 'High') ? "FLAGGED ⚠️" : "RECORDED ✓",
-          prev_hash: SYNTHETIC_AUDIT_LEDGER[0] ? SYNTHETIC_AUDIT_LEDGER[0].current_hash : "GENESIS_BLOCK",
-          current_hash: data.audit_hash || generateHash(`NURSE_VITAL:${caseId}:${Date.now()}`),
-          payload: { case_id: caseId, parameter: paramName, value: val, unit: unit }
-        });
+
 
         if (feedback) {
           feedback.style.display = 'block';
-          feedback.innerHTML = `<span style="color:var(--alert-success-text); font-weight:700;">✓ ${paramName} (${val} ${unit}) recorded for ${patientName}. Sealed in cryptographic audit ledger.</span>`;
+          feedback.innerHTML = `<span style="color:var(--alert-success-text); font-weight:700;">✓ ${escapeHtml(paramName)} (${escapeHtml(val)} ${escapeHtml(unit)}) recorded for ${escapeHtml(patientName)}. Stored in the application audit trail.</span>`;
         }
 
         await loadNurseView();
@@ -3209,7 +3074,7 @@ def get_micromedx_console_html():
             <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Reference Range:</span> <strong>${v.reference_range || 'Normal'}</strong></div>
             <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Status:</span> <strong style="color:${v.status === 'Critical' || v.status === 'High' ? 'var(--alert-critical)' : 'var(--alert-success-text)'};">${v.status}</strong></div>
             <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Recorded Time:</span> <span style="font-family:var(--font-mono);">${v.recorded_time}</span></div>
-            <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Recorded By:</span> <strong>${v.recorded_by || 'Elena Rostova, RN'}</strong></div>
+            <div><span style="color:var(--text-muted); font-size:0.72rem; font-weight:700; text-transform:uppercase; display:block;">Recorded By:</span> <strong>${escapeHtml(v.recorded_by || 'Not recorded')}</strong></div>
           </div>
         </div>
 
@@ -3242,8 +3107,8 @@ def get_micromedx_console_html():
 
         // Summary Cards
         document.getElementById('pharm-stat-received').innerText = data.stats.prescriptions_received;
-        document.getElementById('pharm-stat-available').innerText = data.stats.available;
-        document.getElementById('pharm-stat-unavailable').innerText = data.stats.unavailable;
+        document.getElementById('pharm-stat-available').innerText = data.stats.inventory_tracked ? data.stats.available : '—';
+        document.getElementById('pharm-stat-unavailable').innerText = data.stats.inventory_tracked ? data.stats.unavailable : '—';
         document.getElementById('pharm-stat-sub-requests').innerText = data.stats.substitution_requests;
         document.getElementById('pharm-stat-approval-pending').innerText = data.stats.doctor_approval_pending;
         document.getElementById('pharm-stat-ready-dispensing').innerText = data.stats.ready_for_dispensing;
@@ -3280,16 +3145,16 @@ def get_micromedx_console_html():
         <tr>
           <td>
             <button type="button" class="btn-link" onclick="openPatientHistoryModal('${item.case_id}')"><strong>${item.patient_name}</strong></button>
-            <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${item.case_id} &bull; ${item.mrn}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono);">${escapeHtml(item.case_id || '')} &bull; ${escapeHtml(item.mrn || 'MRN not recorded')}</div>
           </td>
           <td>
             <strong style="color:var(--text-primary); font-size:0.9rem;">${item.prescribed_medicine}</strong>
-            <div style="font-size:0.75rem; color:var(--text-muted);">Prescriber: ${item.prescribing_doctor}</div>
+            <div style="font-size:0.75rem; color:var(--text-muted);">Prescriber: ${escapeHtml(item.prescribing_doctor || 'Not recorded')}</div>
           </td>
           <td><span style="font-weight:700;">${item.strength}</span></td>
-          <td><span class="badge badge-neutral">${item.formulation}</span></td>
+          <td><span class="badge badge-neutral">${escapeHtml(item.formulation || 'Not recorded')}</span></td>
           <td>
-            <span class="badge ${item.availability === 'AVAILABLE' ? 'badge-success' : 'badge-critical'}">${item.availability}</span>
+            <span class="badge ${item.availability === 'AVAILABLE' ? 'badge-success' : item.availability === 'UNAVAILABLE' ? 'badge-critical' : 'badge-neutral'}">${escapeHtml(item.availability || 'Not tracked')}</span>
           </td>
           <td>
             <span class="badge ${item.substitution_status.includes('Approved') || item.substitution_status.includes('Authorized') ? 'badge-success' : item.substitution_status.includes('Doctor') || item.substitution_status.includes('Pending') ? 'badge-warning' : 'badge-neutral'}">
@@ -3297,8 +3162,8 @@ def get_micromedx_console_html():
             </span>
           </td>
           <td>
-            <button type="button" class="btn ${item.availability === 'AVAILABLE' ? 'btn-primary' : 'btn-secondary'} btn-sm" onclick="openMedicationAvailabilityModal('${item.case_id}')">
-              ${item.availability === 'AVAILABLE' ? 'Check Availability' : 'Check Availability'}
+            <button type="button" class="btn ${item.availability === 'UNTRACKED' ? 'btn-secondary' : 'btn-primary'} btn-sm" onclick="openMedicationAvailabilityModal('${escapeHtml(item.case_id || '')}')">
+              ${item.availability === 'UNTRACKED' ? 'Inventory not tracked' : 'Check Availability'}
             </button>
           </td>
         </tr>
@@ -3321,6 +3186,10 @@ def get_micromedx_console_html():
     function openMedicationAvailabilityModal(caseId) {
       const item = appState.availabilityQueue.find(q => q.case_id === caseId);
       if (!item) return;
+      if (item.availability === 'UNTRACKED') {
+        alert('Inventory status is not recorded in the database. This order cannot be marked available or ready to dispense.');
+        return;
+      }
 
       appState.activeAvailabilityCaseId = caseId;
       document.getElementById('avail-modal-case-badge').innerText = item.case_id;
@@ -3536,28 +3405,11 @@ def get_micromedx_console_html():
           })
         });
         const data = await res.json();
+        if (!res.ok) throw new Error(data.detail || 'Dispensing state was not recorded.');
 
-        item.status = "Ready for Dispensing";
-        item.substitution_status = "Dispensing Authorized ✓";
-        item.is_ready_for_dispensing = true;
-
-        SYNTHETIC_AUDIT_LEDGER.unshift({
-          id: SYNTHETIC_AUDIT_LEDGER.length + 1,
-          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19) + " UTC",
-          actor: "Marcus Vance, PharmD",
-          role: "Pharmacist",
-          category: "VERIFICATION",
-          entity: `${item.patient_name} (${item.case_id})`,
-          action: `Prescription Verified & Marked Ready for Dispensing: ${item.prescribed_medicine} ${item.strength}`,
-          result: "READY TO DISPENSE ✓",
-          prev_hash: SYNTHETIC_AUDIT_LEDGER[0] ? SYNTHETIC_AUDIT_LEDGER[0].current_hash : "GENESIS_BLOCK",
-          current_hash: data.audit_hash || generateHash(`DISPENSE:${caseId}:${Date.now()}`),
-          payload: { case_id: caseId, medication: item.prescribed_medicine, status: "READY_FOR_DISPENSING" }
-        });
-
-        alert(`✓ Status: READY FOR DISPENSING\nCryptographic Audit Event Sealed.`);
+        alert('✓ Status recorded by the backend.');
         closeMedicationAvailabilityModal();
-        loadPharmacistView();
+        await loadPharmacistView();
       } catch (err) {
         alert('Dispensing recording note: ' + err.message);
       }
@@ -3625,31 +3477,31 @@ def get_micromedx_console_html():
         <div class="patient-history-header-card">
           <div class="history-meta-item">
             <div class="history-meta-label">Patient Name</div>
-            <div class="history-meta-value" style="font-size:1.05rem; color:var(--clinical-blue-dark);">${h.name}</div>
+          <div class="history-meta-value" style="font-size:1.05rem; color:var(--clinical-blue-dark);">${escapeHtml(h.name || 'Not recorded')}</div>
           </div>
           <div class="history-meta-item">
             <div class="history-meta-label">Patient ID / MRN</div>
-            <div class="history-meta-value">${h.patient_identifier} &bull; ${h.mrn}</div>
+            <div class="history-meta-value">${escapeHtml(h.patient_identifier || 'Not recorded')} &bull; ${escapeHtml(h.mrn || 'MRN not recorded')}</div>
           </div>
           <div class="history-meta-item">
             <div class="history-meta-label">Age / Sex</div>
-            <div class="history-meta-value">${h.age} Years &bull; ${h.sex}</div>
+            <div class="history-meta-value">${h.age == null ? 'Age not recorded' : `${escapeHtml(h.age)} years`} &bull; ${escapeHtml(h.sex || 'Sex not recorded')}</div>
           </div>
           <div class="history-meta-item">
             <div class="history-meta-label">Blood Group</div>
-            <div class="history-meta-value"><span class="badge badge-info">${h.blood_group || 'O+'}</span></div>
+            <div class="history-meta-value"><span class="badge badge-info">${escapeHtml(h.blood_group || 'Not recorded')}</span></div>
           </div>
           <div class="history-meta-item">
             <div class="history-meta-label">Documented Allergies</div>
-            <div class="history-meta-value" style="color:var(--alert-critical-text); font-weight:700;">${h.allergies_summary || 'None documented'}</div>
+            <div class="history-meta-value" style="color:var(--alert-critical-text); font-weight:700;">${escapeHtml(h.allergies_summary || 'Not recorded')}</div>
           </div>
           <div class="history-meta-item">
             <div class="history-meta-label">Primary Conditions</div>
-            <div class="history-meta-value">${h.conditions_summary || 'Essential Hypertension'}</div>
+            <div class="history-meta-value">${escapeHtml(h.conditions_summary || 'Not recorded')}</div>
           </div>
           <div class="history-meta-item">
             <div class="history-meta-label">Last Updated</div>
-            <div class="history-meta-value" style="font-family:var(--font-mono); font-size:0.8rem;">${h.last_updated || 'Today'}</div>
+            <div class="history-meta-value" style="font-family:var(--font-mono); font-size:0.8rem;">${escapeHtml(h.last_updated || 'Not recorded')}</div>
           </div>
         </div>
 
@@ -3661,9 +3513,9 @@ def get_micromedx_console_html():
           <div class="timeline-track">
             ${(h.timeline || []).map(t => `
               <div class="timeline-node ${t.badge === 'DISPENSING' ? 'success' : t.badge === 'SUBSTITUTION' ? 'warning' : ''}">
-                <div class="timeline-time">${t.date}</div>
-                <div class="timeline-desc">${t.event}</div>
-                <div class="timeline-actor">Actor: <strong>${t.actor}</strong> &bull; <span class="badge badge-neutral">${t.badge}</span></div>
+                <div class="timeline-time">${escapeHtml(t.date || 'Not recorded')}</div>
+                <div class="timeline-desc">${escapeHtml(t.event || '')}</div>
+                <div class="timeline-actor">Actor: <strong>${escapeHtml(t.actor || 'Not recorded')}</strong> &bull; <span class="badge badge-neutral">${escapeHtml(t.badge || '')}</span></div>
               </div>
             `).join('')}
           </div>
@@ -3688,10 +3540,10 @@ def get_micromedx_console_html():
               <tbody>
                 ${(h.medical_conditions || []).map(c => `
                   <tr>
-                    <td><strong style="color:var(--text-primary); font-size:0.88rem;">${c.condition}</strong></td>
-                    <td style="font-size:0.82rem; font-family:var(--font-mono);">${c.diagnosis_date}</td>
-                    <td><span class="badge badge-success">${c.status}</span></td>
-                    <td style="font-size:0.82rem; color:var(--text-secondary);">${c.notes}</td>
+                    <td><strong style="color:var(--text-primary); font-size:0.88rem;">${escapeHtml(c.condition || '')}</strong></td>
+                    <td style="font-size:0.82rem; font-family:var(--font-mono);">${escapeHtml(c.diagnosis_date || 'Not recorded')}</td>
+                    <td><span class="badge badge-success">${escapeHtml(c.status || 'Not recorded')}</span></td>
+                    <td style="font-size:0.82rem; color:var(--text-secondary);">${escapeHtml(c.notes || '')}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -3721,13 +3573,13 @@ def get_micromedx_console_html():
               <tbody>
                 ${(h.medication_history || []).map(m => `
                   <tr>
-                    <td><strong style="color:var(--text-primary);">${m.medication}</strong></td>
-                    <td><span style="font-weight:700;">${m.strength}</span></td>
-                    <td><span class="badge badge-neutral">${m.route}</span></td>
-                    <td style="font-size:0.8rem; font-family:var(--font-mono);">${m.start_date}</td>
-                    <td style="font-size:0.8rem; font-family:var(--font-mono);">${m.end_date}</td>
-                    <td><span class="badge ${m.status.includes('Active') ? 'badge-success' : 'badge-neutral'}">${m.status}</span></td>
-                    <td style="font-size:0.82rem; color:var(--clinical-blue-dark); font-weight:600;">${m.prescribing_doctor}</td>
+                    <td><strong style="color:var(--text-primary);">${escapeHtml(m.medication || '')}</strong></td>
+                    <td><span style="font-weight:700;">${escapeHtml(m.strength || 'Not recorded')}</span></td>
+                    <td><span class="badge badge-neutral">${escapeHtml(m.route || 'Not recorded')}</span></td>
+                    <td style="font-size:0.8rem; font-family:var(--font-mono);">${escapeHtml(m.start_date || 'Not recorded')}</td>
+                    <td style="font-size:0.8rem; font-family:var(--font-mono);">${escapeHtml(m.end_date || 'Not recorded')}</td>
+                    <td><span class="badge ${m.status && m.status.includes('Active') ? 'badge-success' : 'badge-neutral'}">${escapeHtml(m.status || 'Not recorded')}</span></td>
+                    <td style="font-size:0.82rem; color:var(--clinical-blue-dark); font-weight:600;">${escapeHtml(m.prescribing_doctor || 'Not recorded')}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -3754,10 +3606,10 @@ def get_micromedx_console_html():
               <tbody>
                 ${(h.allergies && h.allergies.length > 0) ? h.allergies.map(a => `
                   <tr>
-                    <td><strong style="color:var(--alert-critical); font-size:0.88rem;">${a.allergen}</strong></td>
-                    <td style="font-size:0.82rem;">${a.reaction}</td>
-                    <td><span class="badge badge-critical">${a.severity}</span></td>
-                    <td style="font-size:0.8rem; font-family:var(--font-mono);">${a.recorded_date}</td>
+                    <td><strong style="color:var(--alert-critical); font-size:0.88rem;">${escapeHtml(a.allergen || '')}</strong></td>
+                    <td style="font-size:0.82rem;">${escapeHtml(a.reaction || 'Not recorded')}</td>
+                    <td><span class="badge badge-critical">${escapeHtml(a.severity || 'Not recorded')}</span></td>
+                    <td style="font-size:0.8rem; font-family:var(--font-mono);">${escapeHtml(a.recorded_date || 'Not recorded')}</td>
                   </tr>
                 `).join('') : `<tr><td colspan="4" style="text-align:center; padding:1rem; color:var(--text-muted);">No known drug allergies documented.</td></tr>`}
               </tbody>
@@ -3787,12 +3639,12 @@ def get_micromedx_console_html():
               <tbody>
                 ${(h.laboratory_history || []).map(l => `
                   <tr style="${l.status.includes('High') || l.status.includes('Critical') ? 'background:#fef2f2;' : ''}">
-                    <td style="font-size:0.78rem; font-family:var(--font-mono);">${l.date}</td>
-                    <td><strong style="color:var(--text-primary); font-size:0.88rem;">${l.test}</strong></td>
-                    <td><strong style="color:${l.status.includes('High') || l.status.includes('Critical') ? 'var(--alert-critical)' : 'var(--text-primary)'}; font-size:0.92rem;">${l.result}</strong></td>
-                    <td>${l.unit || '-'}</td>
-                    <td style="font-size:0.8rem; color:var(--text-muted);">${l.reference_range}</td>
-                    <td><span class="badge ${l.status.includes('High') || l.status.includes('Critical') ? 'badge-critical' : 'badge-success'}">${l.status}</span></td>
+                    <td style="font-size:0.78rem; font-family:var(--font-mono);">${escapeHtml(l.date || 'Not recorded')}</td>
+                    <td><strong style="color:var(--text-primary); font-size:0.88rem;">${escapeHtml(l.test || '')}</strong></td>
+                    <td><strong style="color:${l.status && (l.status.includes('High') || l.status.includes('Critical')) ? 'var(--alert-critical)' : 'var(--text-primary)'}; font-size:0.92rem;">${escapeHtml(l.result || '')}</strong></td>
+                    <td>${escapeHtml(l.unit || '-')}</td>
+                    <td style="font-size:0.8rem; color:var(--text-muted);">${escapeHtml(l.reference_range || 'Not recorded')}</td>
+                    <td><span class="badge ${l.status && (l.status.includes('High') || l.status.includes('Critical')) ? 'badge-critical' : 'badge-neutral'}">${escapeHtml(l.status || 'Not assessed')}</span></td>
                     <td>
                       ${l.source_report_id ? `
                         <button type="button" class="btn btn-secondary btn-sm" style="font-size:0.72rem; padding:0.25rem 0.5rem;" onclick="openLabSourceModal('${l.source_report_id}')">
@@ -3827,11 +3679,11 @@ def get_micromedx_console_html():
               <tbody>
                 ${(h.clinical_assessments || []).map(c => `
                   <tr>
-                    <td style="font-size:0.78rem; font-family:var(--font-mono);">${c.date}</td>
-                    <td><strong style="color:var(--text-primary); font-size:0.88rem;">${c.assessment}</strong></td>
-                    <td><span class="badge ${c.risk_level.includes('Critical') ? 'badge-critical' : 'badge-warning'}">${c.risk_level}</span></td>
-                    <td style="font-size:0.84rem; color:var(--text-secondary); font-weight:600;">${c.recommendation}</td>
-                    <td style="font-size:0.82rem; color:var(--clinical-blue-dark); font-weight:700;">${c.doctor}</td>
+                    <td style="font-size:0.78rem; font-family:var(--font-mono);">${escapeHtml(c.date || 'Not recorded')}</td>
+                    <td><strong style="color:var(--text-primary); font-size:0.88rem;">${escapeHtml(c.assessment || '')}</strong></td>
+                    <td><span class="badge ${c.risk_level && /critical|major/i.test(c.risk_level) ? 'badge-critical' : 'badge-warning'}">${escapeHtml(c.risk_level || 'Not assessed')}</span></td>
+                    <td style="font-size:0.84rem; color:var(--text-secondary); font-weight:600;">${escapeHtml(c.recommendation || 'Not recorded')}</td>
+                    <td style="font-size:0.82rem; color:var(--clinical-blue-dark); font-weight:700;">${escapeHtml(c.doctor || 'Not recorded')}</td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -3860,12 +3712,12 @@ def get_micromedx_console_html():
               <tbody>
                 ${(h.pharmacy_events || []).map(p => `
                   <tr>
-                    <td style="font-size:0.78rem; font-family:var(--font-mono);">${p.date}</td>
-                    <td><strong style="color:var(--text-primary);">${p.medication}</strong></td>
-                    <td><span class="badge ${p.availability.includes('Available') && !p.availability.includes('UNAVAILABLE') ? 'badge-success' : 'badge-critical'}">${p.availability}</span></td>
-                    <td style="font-size:0.82rem; color:var(--text-secondary);">${p.substitution_request}</td>
-                    <td><span class="badge badge-info">${p.doctor_verification}</span></td>
-                    <td><span class="badge badge-success">${p.dispensing_status}</span></td>
+                    <td style="font-size:0.78rem; font-family:var(--font-mono);">${escapeHtml(p.date || 'Not recorded')}</td>
+                    <td><strong style="color:var(--text-primary);">${escapeHtml(p.medication || 'Not recorded')}</strong></td>
+                    <td><span class="badge badge-neutral">${escapeHtml(p.availability || 'Not tracked')}</span></td>
+                    <td style="font-size:0.82rem; color:var(--text-secondary);">${escapeHtml(p.substitution_request || 'None recorded')}</td>
+                    <td><span class="badge badge-info">${escapeHtml(p.doctor_verification || 'Not recorded')}</span></td>
+                    <td><span class="badge badge-neutral">${escapeHtml(p.dispensing_status || 'Not tracked')}</span></td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -3877,7 +3729,7 @@ def get_micromedx_console_html():
         <div class="history-section">
           <div class="history-section-title">
             <span>7. Cryptographic SHA-256 Audit Events</span>
-            <span class="badge badge-success">${(h.audit_events || []).length} Sealed Events</span>
+            <span class="badge badge-info">${(h.audit_events || []).length} Recorded Events</span>
           </div>
           <div class="table-container">
             <table>
@@ -3893,11 +3745,11 @@ def get_micromedx_console_html():
               <tbody>
                 ${(h.audit_events || []).map(a => `
                   <tr>
-                    <td style="font-size:0.75rem; font-family:var(--font-mono);">${a.timestamp}</td>
-                    <td><strong style="color:var(--text-primary); font-size:0.82rem;">${a.user_role}</strong></td>
-                    <td style="font-size:0.82rem; color:var(--text-secondary);">${a.action}</td>
-                    <td><span class="badge badge-neutral" style="font-family:var(--font-mono); font-size:0.72rem;">${a.event_type}</span></td>
-                    <td><code style="color:var(--clinical-teal); font-family:var(--font-mono); font-size:0.72rem;">${a.audit_hash.slice(0, 16)}...</code></td>
+                    <td style="font-size:0.75rem; font-family:var(--font-mono);">${escapeHtml(a.timestamp || 'Not recorded')}</td>
+                    <td><strong style="color:var(--text-primary); font-size:0.82rem;">${escapeHtml(a.user_role || 'Not recorded')}</strong></td>
+                    <td style="font-size:0.82rem; color:var(--text-secondary);">${escapeHtml(a.action || '')}</td>
+                    <td><span class="badge badge-neutral" style="font-family:var(--font-mono); font-size:0.72rem;">${escapeHtml(a.event_type || '')}</span></td>
+                    <td><code style="color:var(--clinical-teal); font-family:var(--font-mono); font-size:0.72rem;">${a.audit_hash ? `${escapeHtml(a.audit_hash.slice(0, 16))}...` : 'Not available'}</code></td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -3911,19 +3763,58 @@ def get_micromedx_console_html():
     // 9. ADMIN VIEW & AUDIT LEDGER
     // =========================================================================
     async function loadAdminView() {
-      const totalPts = SYNTHETIC_PATIENTS.length;
-      document.getElementById('admin-stat-total-pts').innerText = totalPts;
-      document.getElementById('badge-total-patient-count').innerText = `${totalPts} Patients Total`;
-
-      renderPatientDirectoryTable();
-      renderAuditLedgerTable();
+      try {
+        const response = await fetch('/api/dashboard/admin');
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.detail || 'Administrator dashboard could not be loaded.');
+        adminPatientRecords = (data.patients || []).map(patient => {
+          const age = patient.date_of_birth ? Math.max(0, Math.floor((Date.now() - new Date(patient.date_of_birth).getTime()) / 31557600000)) : null;
+          return {
+            id: patient.patient_identifier || '',
+            name: patient.name || 'Not recorded',
+            age: age === null ? 'Not recorded' : age,
+            sex: patient.sex || 'Not recorded',
+            dept: patient.department || 'Not recorded',
+            condition: patient.latest_finding || 'Not recorded',
+            regimen: (patient.active_medications || []).join(', ') || 'Not recorded',
+            risk: patient.risk || 'Not recorded',
+          };
+        });
+        adminAuditRecords = ((data.audit_chain || {}).recent_records || []).map((record, index) => ({
+          id: record.id,
+          timestamp: record.timestamp || 'Not recorded',
+          actor: record.actor || 'Not recorded',
+          role: record.event_type || 'Not recorded',
+          category: record.category || 'AUDIT',
+          entity: record.entity || 'Not recorded',
+          patient_identifier: record.patient_identifier || null,
+          action: record.action || 'Not recorded',
+          result: record.result || 'Recorded',
+          prev_hash: record.prev_hash || '',
+          current_hash: record.hash || '',
+          payload: record.payload || {},
+          _rowIndex: index,
+        }));
+        document.getElementById('admin-stat-total-pts').innerText = adminPatientRecords.length;
+        document.getElementById('badge-total-patient-count').innerText = `${adminPatientRecords.length} Patients Total`;
+        renderPatientDirectoryTable();
+        renderAuditLedgerTable();
+      } catch (error) {
+        adminPatientRecords = [];
+        adminAuditRecords = [];
+        document.getElementById('admin-stat-total-pts').innerText = '—';
+        document.getElementById('badge-total-patient-count').innerText = 'Patient data unavailable';
+        renderPatientDirectoryTable();
+        renderAuditLedgerTable();
+        console.error('Admin dashboard load failed:', error);
+      }
     }
 
     function renderPatientDirectoryTable() {
       const tbody = document.getElementById('admin-patients-tbody');
       if (!tbody) return;
 
-      let filtered = SYNTHETIC_PATIENTS;
+      let filtered = adminPatientRecords;
       if (appState.patientRiskFilter !== 'ALL') filtered = filtered.filter(p => p.risk.toUpperCase() === appState.patientRiskFilter);
       if (appState.patientDeptFilter !== 'ALL') filtered = filtered.filter(p => p.dept === appState.patientDeptFilter);
       if (appState.patientSearchQuery) {
@@ -3938,25 +3829,29 @@ def get_micromedx_console_html():
 
       tbody.innerHTML = pageRecords.map(p => `
         <tr>
-          <td><code style="color:var(--clinical-blue); font-weight:700; font-family:var(--font-mono);">${p.id}</code></td>
+          <td><code style="color:var(--clinical-blue); font-weight:700; font-family:var(--font-mono);">${escapeHtml(p.id)}</code></td>
           <td>
-            <button type="button" class="btn-link" onclick="openPatientHistoryModal('${p.id}')"><strong>${p.name}</strong></button>
+            <button type="button" class="btn-link" data-patient-history="${escapeHtml(p.id)}"><strong>${escapeHtml(p.name)}</strong></button>
           </td>
-          <td>${p.age}y / ${p.sex}</td>
-          <td><span class="badge badge-neutral">${p.dept}</span></td>
-          <td style="font-size:0.84rem; color:var(--text-secondary);">${p.condition}</td>
-          <td style="font-size:0.82rem; color:var(--text-primary); font-weight:600;">${p.regimen}</td>
-          <td><span class="badge ${p.risk === 'Critical' ? 'badge-critical' : p.risk === 'High' ? 'badge-warning' : 'badge-info'}">${p.risk}</span></td>
-          <td style="font-size:0.82rem; color:var(--clinical-blue-dark); font-weight:600;">${p.clinician}</td>
+          <td>${escapeHtml(p.age)} / ${escapeHtml(p.sex)}</td>
+          <td><span class="badge badge-neutral">${escapeHtml(p.dept)}</span></td>
+          <td style="font-size:0.84rem; color:var(--text-secondary);">${escapeHtml(p.condition)}</td>
+          <td style="font-size:0.82rem; color:var(--text-primary); font-weight:600;">${escapeHtml(p.regimen)}</td>
+          <td><span class="badge ${p.risk === 'CRITICAL' ? 'badge-critical' : ['HIGH', 'MAJOR'].includes(p.risk) ? 'badge-warning' : 'badge-info'}">${escapeHtml(p.risk)}</span></td>
+          <td style="font-size:0.82rem; color:var(--clinical-blue-dark); font-weight:600;">Not recorded</td>
           <td>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openPatientHistoryModal('${p.id}')">
+            <button type="button" class="btn btn-secondary btn-sm" data-patient-history="${escapeHtml(p.id)}">
               📋 Medical History
             </button>
           </td>
         </tr>
       `).join('');
 
-      document.getElementById('patient-pagination-info').innerText = `Showing ${startIndex + 1} to ${Math.min(startIndex + appState.patientPageSize, totalRecords)} of ${totalRecords} records`;
+      tbody.querySelectorAll('[data-patient-history]').forEach(button => {
+        button.addEventListener('click', () => openPatientHistoryModal(button.dataset.patientHistory));
+      });
+
+      document.getElementById('patient-pagination-info').innerText = totalRecords ? `Showing ${startIndex + 1} to ${Math.min(startIndex + appState.patientPageSize, totalRecords)} of ${totalRecords} records` : 'No patient records found';
       document.getElementById('btn-pt-prev').disabled = appState.patientCurrentPage <= 1;
       document.getElementById('btn-pt-next').disabled = appState.patientCurrentPage >= totalPages;
     }
@@ -3991,7 +3886,7 @@ def get_micromedx_console_html():
       const tbody = document.getElementById('admin-audit-tbody');
       if (!tbody) return;
 
-      let filtered = SYNTHETIC_AUDIT_LEDGER;
+      let filtered = adminAuditRecords;
       if (appState.auditCategoryFilter !== 'ALL') {
         filtered = filtered.filter(a => a.category.toUpperCase().includes(appState.auditCategoryFilter));
       }
@@ -4005,26 +3900,34 @@ def get_micromedx_console_html():
       const startIndex = (appState.auditCurrentPage - 1) * appState.auditPageSize;
       const pageRecords = filtered.slice(startIndex, startIndex + appState.auditPageSize);
 
-      tbody.innerHTML = pageRecords.map((b, idx) => `
+      tbody.innerHTML = pageRecords.map((b) => `
         <tr class="clickable-row">
-          <td onclick="openAuditBlockDrawer(${b.id - 1})"><small style="font-family:var(--font-mono); font-size:0.75rem;">${b.timestamp}</small></td>
-          <td onclick="openAuditBlockDrawer(${b.id - 1})"><strong style="color:var(--text-primary); font-size:0.84rem;">${b.actor}</strong></td>
-          <td onclick="openAuditBlockDrawer(${b.id - 1})"><span class="badge ${b.category === 'VERIFICATION' ? 'badge-success' : b.category === 'SUBSTITUTION' ? 'badge-info' : b.category === 'SAFETY' ? 'badge-critical' : 'badge-neutral'}">${b.category}</span></td>
+          <td data-audit-index="${b._rowIndex}"><small style="font-family:var(--font-mono); font-size:0.75rem;">${escapeHtml(b.timestamp)}</small></td>
+          <td data-audit-index="${b._rowIndex}"><strong style="color:var(--text-primary); font-size:0.84rem;">${escapeHtml(b.actor)}</strong></td>
+          <td data-audit-index="${b._rowIndex}"><span class="badge ${b.category === 'VERIFICATION' ? 'badge-success' : b.category === 'SUBSTITUTION' ? 'badge-info' : b.category === 'SAFETY' ? 'badge-critical' : 'badge-neutral'}">${escapeHtml(b.category)}</span></td>
           <td>
-            <button type="button" class="btn-link" onclick="openPatientHistoryModal('${b.entity}')"><strong>${b.entity}</strong></button>
+            ${b.patient_identifier ? `<button type="button" class="btn-link" data-patient-history="${escapeHtml(b.patient_identifier)}"><strong>${escapeHtml(b.entity)}</strong></button>` : `<strong>${escapeHtml(b.entity)}</strong>`}
           </td>
-          <td onclick="openAuditBlockDrawer(${b.id - 1})" style="font-size:0.82rem; color:var(--text-secondary);">${b.action}</td>
-          <td onclick="openAuditBlockDrawer(${b.id - 1})"><span class="badge ${b.result.includes('FLAGGED') || b.result.includes('HOLD') ? 'badge-critical' : 'badge-success'}">${b.result}</span></td>
-          <td onclick="openAuditBlockDrawer(${b.id - 1})"><code style="color:var(--clinical-teal); font-family:var(--font-mono); font-size:0.72rem;">${b.current_hash.slice(0, 14)}...</code></td>
+          <td data-audit-index="${b._rowIndex}" style="font-size:0.82rem; color:var(--text-secondary);">${escapeHtml(b.action)}</td>
+          <td data-audit-index="${b._rowIndex}"><span class="badge ${b.result.includes('FLAGGED') || b.result.includes('HOLD') ? 'badge-critical' : 'badge-success'}">${escapeHtml(b.result)}</span></td>
+          <td data-audit-index="${b._rowIndex}"><code style="color:var(--clinical-teal); font-family:var(--font-mono); font-size:0.72rem;">${escapeHtml(b.current_hash.slice(0, 14))}...</code></td>
           <td>
-            <button type="button" class="btn btn-secondary btn-sm" onclick="openPatientHistoryModal('${b.entity}')">
-              📋 History
-            </button>
+            ${b.patient_identifier ? `<button type="button" class="btn btn-secondary btn-sm" data-patient-history="${escapeHtml(b.patient_identifier)}">📋 History</button>` : ''}
           </td>
         </tr>
       `).join('');
 
-      document.getElementById('audit-pagination-info').innerText = `Showing ${startIndex + 1} to ${Math.min(startIndex + appState.auditPageSize, totalRecords)} of ${totalRecords} audit records`;
+      tbody.querySelectorAll('[data-audit-index]').forEach(cell => {
+        cell.addEventListener('click', () => openAuditBlockDrawer(Number(cell.dataset.auditIndex)));
+      });
+      tbody.querySelectorAll('[data-patient-history]').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          openPatientHistoryModal(button.dataset.patientHistory);
+        });
+      });
+
+      document.getElementById('audit-pagination-info').innerText = totalRecords ? `Showing ${startIndex + 1} to ${Math.min(startIndex + appState.auditPageSize, totalRecords)} of ${totalRecords} audit records` : 'No audit records found';
       document.getElementById('btn-audit-prev').disabled = appState.auditCurrentPage <= 1;
       document.getElementById('btn-audit-next').disabled = appState.auditCurrentPage >= totalPages;
     }
@@ -4049,7 +3952,7 @@ def get_micromedx_console_html():
     }
 
     function openAuditBlockDrawer(index) {
-      const b = SYNTHETIC_AUDIT_LEDGER[index];
+      const b = adminAuditRecords[index];
       if (!b) return;
 
       document.getElementById('audit-detail-id').innerText = '#' + b.id;
@@ -4725,6 +4628,7 @@ def get_micromedx_console_html():
       location.reload();
     }
 
+  </script>
   <!-- Standalone ML Severity Advisory Integration -->
   <div id="ml-severity-advisory-panel" style="display:none;" aria-hidden="true">
     <h3>ML Severity Advisory</h3>
@@ -4737,7 +4641,6 @@ def get_micromedx_console_html():
     <pre id="result">Loading model status...</pre>
   </div>
 
-  </script>
 </body>
 </html>"""
     return HTMLResponse(content=html_content, status_code=200)
