@@ -1,11 +1,11 @@
 {
-  "timestamp": "2026-09-26T03:09:48.616928+00:00",
+  "timestamp": "2026-10-24T20:57:06.833046+00:00",
   "platform": "AEGIS Rx (Offline Medication Safety Platform)",
   "version": "1.0.0",
   "summary": {
-    "test_count": 313,
+    "test_count": 364,
     "pytest_status": "PASSED",
-    "pytest_output": "313 passed, 1781 warnings in 11.38s",
+    "pytest_output": "364 passed, 2543 warnings in 6.42s",
     "all_validations_passed": true
   },
   "demo_cases": {

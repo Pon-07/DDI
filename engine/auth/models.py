@@ -12,20 +12,23 @@ class AuthBase(DeclarativeBase):
 class User(AuthBase):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    phone_number: Mapped[str] = mapped_column(String(50), unique=True, index=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[Optional[str]] = mapped_column(String(100), unique=True, nullable=True, index=True)
+    phone_number: Mapped[Optional[str]] = mapped_column(String(50), unique=True, nullable=True, index=True)
     full_name: Mapped[str] = mapped_column(String(255), index=True)
-    role: Mapped[str] = mapped_column(String(50), index=True)  # Doctor, Nurse, Clinical Pharmacist, Administrator
+    role: Mapped[str] = mapped_column(String(50), default="clinician", index=True)  # Doctor, Nurse, Clinical Pharmacist, Administrator
     department: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     license_number: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     email: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     demo_mode_allowed: Mapped[bool] = mapped_column(Boolean, default=True)
-    totp_secret: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    password_hash: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    totp_secret: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     totp_last_verified_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     totp_last_timestep: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     # Relationships
@@ -34,22 +37,22 @@ class User(AuthBase):
     )
 
     def __repr__(self) -> str:
-        return f"<User(id={self.id}, phone='{self.phone_number}', name='{self.full_name}', role='{self.role}')>"
+        return f"<User(id={self.id}, username='{self.username}', phone='{self.phone_number}', name='{self.full_name}', role='{self.role}')>"
 
 
 class UserSession(AuthBase):
     __tablename__ = "user_sessions"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     session_token: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     role: Mapped[str] = mapped_column(String(50), index=True)
-    phone_number: Mapped[str] = mapped_column(String(50), index=True)
+    phone_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True, index=True)
     ip_address: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     user_agent: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
-    last_activity_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_activity_at: Mapped[Optional[datetime]] = mapped_column(DateTime, default=datetime.utcnow, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 
     # Relationships
@@ -62,7 +65,7 @@ class UserSession(AuthBase):
 class OTPRecord(AuthBase):
     __tablename__ = "otp_records"
 
-    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     phone_number: Mapped[str] = mapped_column(String(50), index=True)
     otp_hash: Mapped[str] = mapped_column(String(128), index=True)
     provider: Mapped[str] = mapped_column(String(50), default="local")
@@ -78,3 +81,10 @@ class OTPRecord(AuthBase):
 
     def __repr__(self) -> str:
         return f"<OTPRecord(id={self.id}, phone='{self.phone_number}', used={self.is_used}, remaining={self.attempts_remaining})>"
+
+
+def init_auth_tables(target_engine=None):
+    """Ensure users, user_sessions, and otp_records tables exist."""
+    from database.database import engine as default_engine
+    eng = target_engine or default_engine
+    AuthBase.metadata.create_all(bind=eng)

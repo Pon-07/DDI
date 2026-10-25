@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+from typing import Any, Dict, List, Optional
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -32,8 +33,23 @@ def _env_int(name: str, default: int, minimum: int, maximum: int | None = None) 
     return value
 
 
+def normalize_phone(phone: str) -> str:
+    """Normalize phone number to digits or standard E.164 representation."""
+    if not phone:
+        return ""
+    digits = re.sub(r"\D", "", phone.strip())
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    return f"+{digits}" if digits else ""
+
+
 class AuthConfig:
     """Environment-backed auth settings with production-safe defaults."""
+
+    COOKIE_NAME: str = "aegis_session"
+    SESSION_DURATION_SECONDS: int = 12 * 3600  # 12 hours
 
     DEMO_MODE = _env_bool("AEGIS_DEMO_MODE", False)
     DEMO_DEFAULT_OTP = os.getenv("AEGIS_DEMO_DEFAULT_OTP") or None
@@ -64,6 +80,12 @@ class AuthConfig:
     )
 
     @classmethod
+    def is_demo_mode(cls) -> bool:
+        """Evaluate if server-side demo mode is enabled via environment variable."""
+        val = os.getenv("AEGIS_DEMO_MODE", "false").strip().lower()
+        return val in {"true", "1", "yes", "on"}
+
+    @classmethod
     def demo_otp(cls, demo_mode: bool) -> str | None:
         """Return an explicitly configured demo OTP only in demo mode."""
         candidate = cls.DEMO_DEFAULT_OTP
@@ -73,6 +95,78 @@ class AuthConfig:
         if not re.fullmatch(r"\d{6}", candidate) or candidate in cls._WEAK_OTPS:
             return None
         return candidate
+
+    DEMO_PERSONAS: Dict[str, Dict[str, Any]] = {
+        "doctor": {
+            "id": "doctor",
+            "name": "Demo Doctor",
+            "username": "demo_doctor",
+            "phone_number": "+15555550101",
+            "role": "doctor",
+            "demo_mode_allowed": True,
+        },
+        "nurse": {
+            "id": "nurse",
+            "name": "Demo Nurse",
+            "username": "demo_nurse",
+            "phone_number": "+15555550102",
+            "role": "nurse",
+            "demo_mode_allowed": True,
+        },
+        "pharmacist": {
+            "id": "pharmacist",
+            "name": "Demo Pharmacist",
+            "username": "demo_pharmacist",
+            "phone_number": "+15555550103",
+            "role": "pharmacist",
+            "demo_mode_allowed": True,
+        },
+        "administrator": {
+            "id": "administrator",
+            "name": "Demo Administrator",
+            "username": "demo_admin",
+            "phone_number": "+15555550104",
+            "role": "administrator",
+            "demo_mode_allowed": True,
+        },
+    }
+
+    @classmethod
+    def resolve_persona(cls, identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Deterministically resolve persona by key (e.g. 'doctor', 'admin') or phone number.
+        Returns None if identifier does not match any configured persona.
+        """
+        if not identifier or not isinstance(identifier, str):
+            return None
+
+        clean_id = identifier.strip().lower()
+        # Direct key alias check
+        if clean_id in cls.DEMO_PERSONAS:
+            return cls.DEMO_PERSONAS[clean_id]
+        if clean_id in {"admin", "administrator"}:
+            return cls.DEMO_PERSONAS["administrator"]
+
+        # Phone number check against DEMO_PERSONAS
+        norm_phone = normalize_phone(identifier)
+        for persona in cls.DEMO_PERSONAS.values():
+            if normalize_phone(persona["phone_number"]) == norm_phone:
+                return persona
+
+        # Also support DEMO_PERSONAS list from origin/main
+        for persona in DEMO_PERSONAS:
+            if normalize_phone(persona["phone_number"]) == norm_phone:
+                role_lower = persona["role"].lower().replace("clinical ", "")
+                return {
+                    "id": role_lower,
+                    "name": persona["full_name"],
+                    "username": f"demo_{role_lower}",
+                    "phone_number": persona["phone_number"],
+                    "role": persona["role"],
+                    "demo_mode_allowed": True,
+                }
+
+        return None
 
 
 SUPPORTED_ROLES = ["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"]
