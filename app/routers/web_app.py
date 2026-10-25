@@ -30,30 +30,38 @@ def get_micromedx_console_html():
       --font-heading: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
       --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 
-      /* Healthcare Design System Palette */
-      --bg-surface: #F7F9FC;
+      /* Healthcare Design System Palette - Professional Red & White */
+      --bg-surface: #F8FAFC;
       --bg-card: #ffffff;
-      --bg-card-hover: #fcfdfe;
+      --bg-card-hover: #ffffff;
       --bg-subtle: #f1f5f9;
       --bg-input: #ffffff;
 
       --border-subtle: #e2e8f0;
       --border-default: #cbd5e1;
       --border-strong: #94a3b8;
-      --border-focus: #2563eb;
+      --border-focus: #b91c1c;
 
-      --text-primary: #0f172a;
-      --text-secondary: #334155;
+      --text-primary: #1f2937;
+      --text-secondary: #4b5563;
       --text-muted: #64748b;
       --text-light: #94a3b8;
       --text-on-accent: #ffffff;
 
-      /* Clinical Brand Accents */
-      --clinical-blue: #2563eb;
-      --clinical-blue-hover: #1d4ed8;
-      --clinical-blue-dark: #1e40af;
-      --clinical-blue-bg: #eff6ff;
-      --clinical-blue-border: #bfdbfe;
+      /* Clinical Red Brand Accents */
+      --clinical-red: #b91c1c;
+      --clinical-red-hover: #991b1b;
+      --clinical-red-dark: #7f1d1d;
+      --clinical-red-bg: #fef2f2;
+      --clinical-red-border: #fecaca;
+      --clinical-red-subtle: #fff5f5;
+
+      /* Primary Brand Theme Mapping */
+      --clinical-blue: #b91c1c;
+      --clinical-blue-hover: #991b1b;
+      --clinical-blue-dark: #7f1d1d;
+      --clinical-blue-bg: #fef2f2;
+      --clinical-blue-border: #fecaca;
 
       --clinical-teal: #0d9488;
       --clinical-teal-hover: #0f766e;
@@ -169,14 +177,14 @@ def get_micromedx_console_html():
       width: 36px;
       height: 36px;
       border-radius: var(--radius-md);
-      background: linear-gradient(135deg, var(--clinical-blue) 0%, var(--clinical-teal) 100%);
+      background: linear-gradient(135deg, #b91c1c 0%, #991b1b 100%);
       display: flex;
       align-items: center;
       justify-content: center;
       color: #ffffff;
       font-weight: 800;
       font-size: 1.15rem;
-      box-shadow: var(--shadow-sm);
+      box-shadow: 0 2px 4px rgba(185, 28, 28, 0.2);
     }
 
     .brand-title {
@@ -294,13 +302,14 @@ def get_micromedx_console_html():
     }
 
     .role-tab-btn:hover {
-      color: var(--clinical-blue);
+      color: var(--clinical-red);
+      background: var(--clinical-red-subtle);
     }
 
     .role-tab-btn.active {
-      color: var(--clinical-blue);
-      border-bottom-color: var(--clinical-blue);
-      background: var(--clinical-blue-bg);
+      color: var(--clinical-red);
+      border-bottom-color: var(--clinical-red);
+      background: var(--clinical-red-bg);
     }
 
     /* Main Container */
@@ -312,9 +321,10 @@ def get_micromedx_console_html():
 
     /* Hero Dashboard Banner */
     .hero-dashboard-banner {
-      background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+      background: linear-gradient(135deg, #1f2937 0%, #111827 75%, #450a0a 100%);
+      border: 1px solid rgba(185, 28, 28, 0.25);
       border-radius: var(--radius-xl);
-      padding: 1.75rem 2rem;
+      padding: 1.5rem 2rem;
       color: #ffffff;
       margin-bottom: 1.5rem;
       display: flex;
@@ -322,7 +332,7 @@ def get_micromedx_console_html():
       align-items: center;
       position: relative;
       overflow: hidden;
-      box-shadow: var(--shadow-md);
+      box-shadow: var(--shadow-sm);
     }
 
     .hero-left {
@@ -502,11 +512,34 @@ def get_micromedx_console_html():
       padding: 1.25rem 1.4rem;
       margin-bottom: 1.25rem;
       box-shadow: var(--shadow-sm);
-      transition: border-color 0.15s ease, box-shadow 0.15s ease;
+      transition: border-color 0.15s ease, transform 0.2s ease, box-shadow 0.2s ease;
     }
 
     .card:hover {
       border-color: #cbd5e1;
+      box-shadow: var(--shadow-md);
+      transform: translateY(-1px);
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .eval-result-container {
+      animation: fadeIn 0.22s ease-out;
+    }
+
+    .role-view {
+      animation: fadeIn 0.18s ease-out;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.001ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.001ms !important;
+      }
     }
 
     .card-header {
@@ -2595,6 +2628,7 @@ def get_micromedx_console_html():
     async function loadDoctorView() {
       try {
         const res = await fetch('/api/dashboard/doctor');
+        if (!res.ok) throw new Error((await res.json()).detail || 'Doctor dashboard could not be loaded.');
         const data = await res.json();
 
         document.getElementById('doc-stat-patients').innerText = data.stats.total_patients;
@@ -2602,7 +2636,8 @@ def get_micromedx_console_html():
         document.getElementById('doc-stat-findings').innerText = data.stats.active_findings_count;
         document.getElementById('doc-stat-substitutions').innerText = data.stats.substitution_requests_count;
         document.getElementById('badge-cosign-count').innerText = `${data.pending_cosigns.length} Pending`;
-        document.getElementById('badge-doctor-sub-count').innerText = `${data.substitution_requests.length} Pending Request`;
+        const pendingSubstitutions = (data.substitution_requests || []).filter(s => s.status === 'pending').length;
+        document.getElementById('badge-doctor-sub-count').innerText = `${pendingSubstitutions} Pending Request${pendingSubstitutions === 1 ? '' : 's'}`;
 
         // Render Doctor Pharmacy Substitution Requests
         const subContainer = document.getElementById('doctor-substitutions-container');
@@ -2614,31 +2649,37 @@ def get_micromedx_console_html():
           `;
         } else {
           subContainer.innerHTML = data.substitution_requests.map(s => `
-            <div style="background:#ffffff; border:1px solid #bfdbfe; border-left:4px solid var(--clinical-teal); border-radius:var(--radius-md); padding:1rem 1.15rem; margin-bottom:0.75rem; box-shadow:var(--shadow-xs);" id="sub-card-${s.case_id}">
+            <div style="background:#ffffff; border:1px solid #bfdbfe; border-left:4px solid var(--clinical-teal); border-radius:var(--radius-md); padding:1rem 1.15rem; margin-bottom:0.75rem; box-shadow:var(--shadow-xs);" id="sub-card-${s.request_id}">
               <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:0.75rem;">
                 <div>
                   <div style="display:flex; align-items:center; gap:0.5rem;">
                     <span class="badge badge-info">PHARMACY SUBSTITUTION REQUEST</span>
-                    <button type="button" class="btn-link" onclick="openPatientHistoryModal('${s.case_id}')"><strong>Patient: ${s.patient_name}</strong></button>
+                    <button type="button" class="btn-link" data-patient-history="${escapeHtml(s.patient_identifier || '')}"><strong>Patient: ${escapeHtml(s.patient_name || '')}</strong></button>
                   </div>
                   <div style="font-size:0.82rem; color:var(--text-secondary); margin:0.35rem 0;">
-                    Original Prescription: <strong>${s.original_prescription}</strong> &bull; Prescribed Brand: <span style="color:var(--alert-critical); font-weight:700;">${s.prescribed_brand} (Unavailable)</span>
+                    Original Prescription: <strong>${escapeHtml(s.original_prescription || '')}</strong>
                   </div>
                   <div style="font-size:0.84rem; color:var(--clinical-teal-hover); font-weight:700;">
-                    Pharmacist Suggested Brand: ${s.suggested_brand} (${s.availability})
+                    Pharmacist Suggested Brand: ${escapeHtml(s.suggested_brand || '')}
                   </div>
                   <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.25rem;">
-                    Reason: ${s.reason} &bull; ${s.pharmacist_note}
+                    Reason: ${escapeHtml(s.reason || '')} &bull; ${escapeHtml(s.pharmacist_note || '')}
                   </div>
+                  <div style="font-size:0.76rem; color:var(--text-muted); margin-top:0.25rem;">Status: <strong>${escapeHtml(s.status || '')}</strong> &bull; Requested by ${escapeHtml(s.pharmacist_name || 'Clinical Pharmacist')} &bull; ${escapeHtml(s.request_date || '')}</div>
                 </div>
                 <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
-                  <button type="button" class="btn btn-success btn-sm" onclick="submitDoctorSubstitutionDecisionAsync('${s.case_id}', 'APPROVED', '${s.suggested_brand}')">✓ Approve Substitution</button>
-                  <button type="button" class="btn btn-danger btn-sm" onclick="submitDoctorSubstitutionDecisionAsync('${s.case_id}', 'REJECTED', '${s.suggested_brand}')">✗ Reject</button>
-                  <button type="button" class="btn btn-secondary btn-sm" onclick="submitDoctorSubstitutionDecisionAsync('${s.case_id}', 'CLARIFICATION_REQUIRED', '${s.suggested_brand}')">⚠️ Request Clarification</button>
+                  ${s.status === 'pending' ? `
+                    <button type="button" class="btn btn-success btn-sm" onclick="submitDoctorSubstitutionDecisionAsync(${Number(s.request_id)}, 'APPROVED')">✓ Approve Substitution</button>
+                    <button type="button" class="btn btn-danger btn-sm" onclick="submitDoctorSubstitutionDecisionAsync(${Number(s.request_id)}, 'REJECTED')">✗ Reject</button>
+                    <button type="button" class="btn btn-secondary btn-sm" onclick="submitDoctorSubstitutionDecisionAsync(${Number(s.request_id)}, 'CLARIFICATION_REQUIRED')">⚠️ Request Clarification</button>
+                  ` : `<span class="badge ${s.status === 'approved' ? 'badge-success' : s.status === 'rejected' ? 'badge-critical' : 'badge-warning'}">${escapeHtml(s.status || '')}</span>`}
                 </div>
               </div>
             </div>
           `).join('');
+          subContainer.querySelectorAll('[data-patient-history]').forEach(button => {
+            button.addEventListener('click', () => openPatientHistoryModal(button.dataset.patientHistory));
+          });
         }
 
         // Render Co-sign queue
@@ -2698,48 +2739,19 @@ def get_micromedx_console_html():
     }
 
     // Submit Doctor decision on Pharmacy Substitution
-    async function submitDoctorSubstitutionDecisionAsync(caseId, decision, suggestedBrand) {
-      const doctorName = appState.currentUser ? appState.currentUser.full_name : "Dr. Sarah Lin, MD";
+    async function submitDoctorSubstitutionDecisionAsync(requestId, decision) {
       try {
         const res = await fetch('/api/dashboard/doctor/substitution-decision', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            case_id: caseId,
-            suggested_brand: suggestedBrand,
-            decision: decision,
-            doctor_name: doctorName,
-            doctor_notes: `Physician decision: ${decision} recorded for brand substitution ${suggestedBrand}.`
+            request_id: requestId,
+            decision: decision
           })
         });
         const data = await res.json();
-        
-        const card = document.getElementById(`sub-card-${caseId}`);
-        if (card) {
-          card.innerHTML = `
-            <div style="color:${decision === 'APPROVED' ? 'var(--alert-success-text)' : 'var(--alert-critical)'}; font-weight:700; font-size:0.86rem; padding:0.4rem 0;">
-              ${decision === 'APPROVED' ? '✓ Brand Substitution APPROVED by Doctor. Pharmacist authorized for dispensing.' : decision === 'REJECTED' ? '✗ Brand Substitution REJECTED by Doctor.' : '⚠️ Clarification Requested from Pharmacy.'}
-              <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono); margin-top:0.25rem;">
-                SHA-256 Cryptographic Hash: ${data.audit_hash}
-              </div>
-            </div>
-          `;
-        }
-
-        // Add to audit ledger records
-        SYNTHETIC_AUDIT_LEDGER.unshift({
-          id: SYNTHETIC_AUDIT_LEDGER.length + 1,
-          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19) + " UTC",
-          actor: doctorName,
-          role: "Doctor",
-          category: "SUBSTITUTION",
-          entity: `Patient (${caseId})`,
-          action: data.message,
-          result: decision === 'APPROVED' ? 'SUBSTITUTION APPROVED ✓' : decision === 'REJECTED' ? 'REJECTED ✗' : 'CLARIFICATION REQ ⚠️',
-          prev_hash: SYNTHETIC_AUDIT_LEDGER[0] ? SYNTHETIC_AUDIT_LEDGER[0].current_hash : "GENESIS_BLOCK",
-          current_hash: data.audit_hash || generateHash(`DOC_DECISION:${caseId}:${Date.now()}`),
-          payload: { case_id: caseId, decision: decision, doctor: doctorName }
-        });
+        if (!res.ok) throw new Error(data.detail || 'Doctor decision could not be saved.');
+        await loadDoctorView();
 
       } catch (err) {
         alert('Substitution decision error: ' + err.message);
@@ -3222,6 +3234,7 @@ def get_micromedx_console_html():
     async function loadPharmacistView() {
       try {
         const res = await fetch('/api/dashboard/pharmacist');
+        if (!res.ok) throw new Error((await res.json()).detail || 'Pharmacist dashboard could not be loaded.');
         const data = await res.json();
 
         appState.availabilityQueue = data.availability_queue || [];
@@ -3424,6 +3437,14 @@ def get_micromedx_console_html():
       closeMedicationAvailabilityModal();
       const item = appState.availabilityQueue.find(q => q.case_id === caseId);
       if (!item) return;
+      if (!item.order_id || !item.medication_id || !item.patient_id) {
+        alert('A matching persisted patient prescription and medication record is required before requesting a substitution.');
+        return;
+      }
+      if (item.substitution_request_status === 'pending' || item.substitution_request_status === 'approved') {
+        alert(`This prescription already has a ${item.substitution_request_status} substitution request.`);
+        return;
+      }
 
       document.getElementById('sub-modal-patient-header').innerText = `Patient: ${item.patient_name} (${item.case_id}) • MRN: ${item.mrn}`;
       document.getElementById('sub-modal-original-rx').innerText = `${item.prescribed_medicine} ${item.strength} ${item.formulation}`;
@@ -3451,6 +3472,11 @@ def get_micromedx_console_html():
       const reason = document.getElementById('sub-modal-reason-input').value;
       const notes = document.getElementById('sub-modal-notes-input').value;
       const btn = document.getElementById('btn-submit-sub-req');
+      if (!item.order_id || !item.medication_id || !item.patient_id || !suggestedBrand) {
+        alert('A persisted prescription, linked medication, and suggested brand are required.');
+        return;
+      }
+      item.idempotencyKey = item.idempotencyKey || crypto.randomUUID();
       btn.innerHTML = 'Sending Request... ⏳';
       btn.disabled = true;
 
@@ -3459,41 +3485,22 @@ def get_micromedx_console_html():
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            case_id: item.case_id,
             patient_id: item.patient_id,
-            patient_name: item.patient_name,
-            prescribed_medicine: item.prescribed_medicine,
-            prescribed_brand: item.prescribed_brand,
-            strength: item.strength,
-            formulation: item.formulation,
+            order_id: item.order_id,
+            medication_id: item.medication_id,
+            idempotency_key: item.idempotencyKey,
             suggested_brand: suggestedBrand,
             reason: reason,
             pharmacist_notes: notes
           })
         });
         const data = await res.json();
-
-        item.substitution_status = "Doctor Approval Pending";
-        item.status = "Pending Doctor Verification";
-
-        // Add to audit ledger records
-        SYNTHETIC_AUDIT_LEDGER.unshift({
-          id: SYNTHETIC_AUDIT_LEDGER.length + 1,
-          timestamp: new Date().toISOString().replace('T', ' ').slice(0, 19) + " UTC",
-          actor: "Marcus Vance, PharmD",
-          role: "Pharmacist",
-          category: "SUBSTITUTION",
-          entity: `${item.patient_name} (${item.case_id})`,
-          action: `Pharmacy Substitution Requested: ${suggestedBrand}`,
-          result: "DOCTOR APPROVAL PENDING ⏳",
-          prev_hash: SYNTHETIC_AUDIT_LEDGER[0] ? SYNTHETIC_AUDIT_LEDGER[0].current_hash : "GENESIS_BLOCK",
-          current_hash: data.audit_hash || generateHash(`PHARM_SUB:${caseId}:${Date.now()}`),
-          payload: { case_id: caseId, suggested_brand: suggestedBrand, reason: reason }
-        });
+        if (!res.ok) throw new Error(data.detail || 'Substitution request could not be saved.');
+        item.idempotencyKey = null;
 
         alert(`✓ Substitution request sent to Doctor: ${data.message}`);
         closeSubstitutionRequestModal();
-        loadPharmacistView();
+        await loadPharmacistView();
       } catch (err) {
         alert('Substitution request error: ' + err.message);
       } finally {
@@ -4135,7 +4142,7 @@ def get_micromedx_console_html():
       panel.innerHTML = `
         <div class="card" style="background:linear-gradient(135deg, #eff6ff 0%, #f0fdfa 100%); border:1.5px solid #bfdbfe; color:var(--clinical-blue); padding:1.25rem; font-weight:700; display:flex; align-items:center; gap:0.75rem;">
           <div class="pulse-indicator"></div>
-          <span>Executing MICROMEDX 6-Agent Safety Pipeline against deterministic rules, lab evidence, and local Explainable AI...</span>
+          <span>Evaluating clinical medication safety and patient evidence...</span>
         </div>
       `;
 
@@ -4156,6 +4163,173 @@ def get_micromedx_console_html():
       }
     }
 
+
+    function escapeHtml(str) {
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    function renderAlternativeRankerSection(altReport) {
+      if (!altReport) return '';
+      const rawTier = String(altReport.risk_tier || 'UNKNOWN').toUpperCase();
+      const isHigh = rawTier === 'HIGH';
+      const isMod = rawTier === 'MODERATE';
+      const tierBadge = isHigh ? 'badge-critical' : isMod ? 'badge-warning' : 'badge-secondary';
+
+      let contentHtml = '';
+
+      if (altReport.consolidation_action) {
+        const ca = altReport.consolidation_action;
+        contentHtml += `
+          <div style="background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:0.9rem; margin-bottom:0.75rem;">
+            <div style="font-weight:700; color:#1e40af; font-size:0.88rem;">🔒 Recommended Consolidation Action: ${escapeHtml(ca.action_type || 'Consolidate Duplicate Therapy')}</div>
+            <div style="font-size:0.82rem; color:#1e3a8a; margin-top:0.25rem;">${escapeHtml(ca.description || '')}</div>
+            <div style="font-size:0.75rem; color:#64748b; margin-top:0.25rem;">Rationale: ${escapeHtml(ca.reason || 'Duplicate therapeutic class detected; avoid additive toxicity.')}</div>
+          </div>
+        `;
+      }
+
+      if (isMod && altReport.monitoring_action) {
+        const ma = altReport.monitoring_action;
+        contentHtml += `
+          <div style="background:#fefce8; border:1px solid #fef08a; border-radius:8px; padding:0.9rem; margin-bottom:0.75rem;">
+            <div style="font-weight:700; color:#854d0e; font-size:0.88rem;">📋 Clinical Monitoring Action: ${escapeHtml(ma.action_type || 'Active Monitoring')}</div>
+            <div style="font-size:0.82rem; color:#713f12; margin-top:0.25rem;">${escapeHtml(ma.description || '')}</div>
+            <div style="font-size:0.75rem; color:#a16207; margin-top:0.25rem;">Rationale: ${escapeHtml(ma.reason || 'Moderate risk profile; maintain therapy with close clinical surveillance.')}</div>
+          </div>
+        `;
+      }
+
+      if (altReport.replacement_sets && altReport.replacement_sets.length > 0) {
+        altReport.replacement_sets.forEach(rs => {
+          const candidates = rs.candidates || [];
+          const consideredCount = rs.n_considered !== undefined ? rs.n_considered : candidates.length;
+          contentHtml += `
+            <div style="margin-top:0.75rem; margin-bottom:1rem;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.4rem;">
+                <strong style="font-size:0.88rem; color:var(--text-primary);">
+                  Candidate Substitutes for: <span style="color:var(--clinical-teal); text-decoration:underline;">${escapeHtml(rs.replaces || '')}</span>
+                </strong>
+                <span style="font-size:0.75rem; color:var(--text-muted);"><span id="considered-count">Considered:</span> ${escapeHtml(consideredCount)} ${rs.level3_fallback_used ? '(Level-3 Fallback Active)' : '(Level-4 ATC)'}</span>
+              </div>
+          `;
+
+          if (candidates.length === 0) {
+            contentHtml += `
+              <div style="font-size:0.82rem; color:var(--text-muted); background:var(--bg-surface); padding:0.75rem; border-radius:6px; border:1px dashed var(--border-subtle);">
+                ${escapeHtml(rs.unavailable_reason || 'No same-ATC-class alternative drug candidates free of known major interactions are available.')}
+              </div>
+            `;
+          } else {
+            contentHtml += `
+              <div style="overflow-x:auto;">
+                <table class="table" style="width:100%; font-size:0.8rem; margin:0; border-collapse:collapse;">
+                  <thead>
+                    <tr style="background:#f8fafc; border-bottom:1.5px solid var(--border-subtle); text-align:left;">
+                      <th style="padding:0.45rem 0.6rem; width:45px;">Rank</th>
+                      <th style="padding:0.45rem 0.6rem;">Candidate Drug</th>
+                      <th style="padding:0.45rem 0.6rem;">Equivalence</th>
+                      <th style="padding:0.45rem 0.6rem;">Score / 100</th>
+                      <th style="padding:0.45rem 0.6rem;">Regimen Risk</th>
+                      <th style="padding:0.45rem 0.6rem;">Dosing Evidence</th>
+                      <th style="padding:0.45rem 0.6rem;">Status / Review</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+            `;
+
+            candidates.forEach(c => {
+              const isMajor = Boolean(c.known_major_interaction);
+              const score = typeof c.score === 'number' ? c.score.toFixed(1) : (c.score || '0.0');
+              const comps = c.components || {};
+              const interactionClass = String(c.interaction_class || 'unknown').toUpperCase();
+              const dosingTier = String((c.dosing && c.dosing.tier) || 'Unavailable');
+              const needsReview = Boolean(c.needs_pharmacist_review);
+
+              let rowBg = '#ffffff';
+              if (isMajor) rowBg = '#fef2f2';
+              else if (needsReview) rowBg = '#fffbeb';
+
+              const badgeClass = isMajor ? 'badge-critical' : interactionClass === 'MODERATE' ? 'badge-warning' : 'badge-secondary';
+
+              contentHtml += `
+                <tr style="background:${rowBg}; border-bottom:1px solid var(--border-subtle);">
+                  <td style="padding:0.5rem 0.6rem; font-weight:700; color:var(--text-primary);">${escapeHtml(c.rank)}</td>
+                  <td style="padding:0.5rem 0.6rem;">
+                    <strong style="color:var(--text-primary);">${escapeHtml(c.drug_name || '')}</strong>
+                    <div style="font-size:0.72rem; color:var(--text-muted);">${escapeHtml(c.reason || '')}</div>
+                  </td>
+                  <td style="padding:0.5rem 0.6rem;">
+                    <span class="badge badge-info" style="font-size:0.7rem;">${c.equivalence_level === 4 ? 'ATC L4' : 'ATC L3'}</span>
+                  </td>
+                  <td style="padding:0.5rem 0.6rem;">
+                    <strong style="color:var(--clinical-blue);">${escapeHtml(score)}</strong>
+                    <div style="font-size:0.68rem; color:var(--text-muted);">Int:${escapeHtml(comps.interaction !== undefined ? comps.interaction : 0)} Eq:${escapeHtml(comps.equivalence !== undefined ? comps.equivalence : 0)} Dos:${escapeHtml(comps.dosing_evidence !== undefined ? comps.dosing_evidence : 0)}</div>
+                  </td>
+                  <td style="padding:0.5rem 0.6rem;">
+                    <span class="badge ${badgeClass}" style="font-size:0.7rem;">
+                      ${escapeHtml(interactionClass)}
+                    </span>
+                  </td>
+                  <td style="padding:0.5rem 0.6rem; font-size:0.72rem; color:var(--text-secondary);">
+                    ${escapeHtml(dosingTier.replace(/_/g, ' '))}
+                  </td>
+                  <td style="padding:0.5rem 0.6rem;">
+                    ${needsReview ? '<span class="badge badge-warning" style="font-size:0.68rem;">Pharmacist Review</span>' : '<span class="badge badge-success" style="font-size:0.68rem;">Advisory Ready</span>'}
+                    <span class="badge badge-secondary" style="font-size:0.68rem; margin-left:0.25rem;">Co-Sign Req.</span>
+                  </td>
+                </tr>
+              `;
+            });
+
+            contentHtml += `
+                  </tbody>
+                </table>
+              </div>
+            `;
+          }
+          contentHtml += `</div>`;
+        });
+      } else if (!isHigh && !isMod) {
+        contentHtml += `
+          <div style="font-size:0.84rem; color:var(--text-secondary); background:#f8fafc; padding:0.85rem 1.1rem; border-radius:6px; border:1px solid var(--border-subtle);">
+            <strong>Risk Gate Notice:</strong> ${escapeHtml(altReport.no_alternatives_reason || altReport.gate_reason || 'Low or undetermined risk level; drug substitution is withheld to prevent therapeutic instability.')}
+          </div>
+        `;
+      }
+
+      return `
+        <!-- 5b. DETERMINISTIC ALTERNATIVE DRUG RANKING -->
+        <div style="background:#f0fdf4; border:1.5px solid #86efac; border-radius:var(--radius-lg); padding:1.25rem 1.35rem; margin-bottom:1.25rem;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.6rem; flex-wrap:wrap; gap:0.5rem;">
+            <div>
+              <div style="font-size:0.75rem; font-weight:800; text-transform:uppercase; letter-spacing:0.04em; color:#166534;">
+                5b. Alternative Drug Ranking (Deterministic Risk-Gated Evaluation)
+              </div>
+              <div style="font-size:0.78rem; color:#15803d; margin-top:0.15rem;">
+                Ranker: ${escapeHtml(altReport.ranker_version || 'alt-ranker-1.0')} &bull; Gate: <span class="badge ${tierBadge}" style="font-size:0.7rem;">${escapeHtml(rawTier)}</span> &bull; ${escapeHtml(altReport.gate_reason || '')}
+              </div>
+            </div>
+            <div style="display:flex; gap:0.4rem;">
+              <span class="badge badge-secondary" style="font-size:0.7rem;">Advisory Only</span>
+              <span class="badge badge-warning" style="font-size:0.7rem;">Requires Clinician Co-Sign</span>
+            </div>
+          </div>
+
+          ${contentHtml}
+
+          <div style="font-size:0.72rem; color:#475569; margin-top:0.75rem; padding-top:0.5rem; border-top:1px dashed #cbd5e1; font-style:italic;">
+            Clinical Boundaries: ATC classification does not constitute clinical equivalence. Route, dosage form, indication, potency, renal/hepatic clearance, and patient tolerability must be independently assessed by the attending clinician or pharmacist. No dosage is derived or calculated. A drug absent from DDInter is unknown, not proven safe.
+          </div>
+        </div>
+      `;
+    }
+
     function renderDoctorClinicalAIResult(data, scenarioId) {
       const panel = document.getElementById('dynamic-resolution-panel');
       if (!panel) return;
@@ -4170,6 +4344,7 @@ def get_micromedx_console_html():
       const patientId = data.patient ? data.patient.identifier : `CASE-00${scenarioId}`;
       const patientName = data.patient ? data.patient.name : 'Clinical Inpatient';
 
+      const altReport = (data.alternatives && data.alternatives[0]) || (data.resolutions && data.resolutions[0] && data.resolutions[0].alternatives) || null;
       const isCritical = (f.severity || '').toLowerCase().includes('crit') || scenarioId === 1;
       const severityClass = isCritical ? 'badge-critical' : 'badge-warning';
       const borderAccent = isCritical ? 'var(--alert-critical)' : 'var(--alert-warning)';
@@ -4256,6 +4431,8 @@ def get_micromedx_console_html():
                 </button>
               </div>
             </div>
+
+            ${renderAlternativeRankerSection(altReport)}
 
             <!-- 6. CLINICAL EXPLAINABLE AI SECTION -->
             <div class="xai-wrapper">

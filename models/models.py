@@ -1,7 +1,7 @@
 from datetime import date, datetime
 from typing import Any, List, Optional
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, JSON, String, Text
+from sqlalchemy import Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.database import Base
@@ -103,6 +103,43 @@ class Order(Base):
 
     def __repr__(self) -> str:
         return f"<Order(id={self.id}, drug_name='{self.drug_name}', status='{self.status}')>"
+
+
+class SubstitutionRequest(Base):
+    """Persistent pharmacist request for a prescriber-reviewed medication substitution."""
+
+    __tablename__ = "substitution_requests"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    patient_id: Mapped[int] = mapped_column(ForeignKey("patients.id"), index=True)
+    order_id: Mapped[int] = mapped_column(ForeignKey("orders.id"), index=True)
+    medication_id: Mapped[int] = mapped_column(ForeignKey("medications.id"), index=True)
+    idempotency_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    suggested_brand: Mapped[str] = mapped_column(String(255))
+    reason: Mapped[str] = mapped_column(Text)
+    pharmacist_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requested_by_user_id: Mapped[int] = mapped_column(Integer, index=True)
+    requested_by_name: Mapped[str] = mapped_column(String(255))
+    status: Mapped[str] = mapped_column(String(32), default="pending", index=True)
+    doctor_notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    decided_by_user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    decided_by_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    # A prescription may have at most one open request. Once decided, a later request is allowed.
+    __table_args__ = (
+        Index(
+            "uq_substitution_pending_order",
+            "order_id",
+            unique=True,
+            sqlite_where=text("status = 'pending'"),
+        ),
+    )
+
+    def __repr__(self) -> str:
+        return f"<SubstitutionRequest(id={self.id}, order_id={self.order_id}, status='{self.status}')>"
 
 
 class Event(Base):

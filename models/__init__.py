@@ -11,6 +11,7 @@ from models.models import (
     Patient,
     RuleVersion,
     SafetyRule,
+    SubstitutionRequest,
 )
 
 __all__ = [
@@ -26,4 +27,5 @@ __all__ = [
     "SafetyRule",
     "RuleVersion",
     "AuditLedger",
+    "SubstitutionRequest",
 ]

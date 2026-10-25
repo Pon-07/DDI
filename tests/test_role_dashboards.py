@@ -11,7 +11,7 @@ from database.database import Base, get_db
 from engine.auth.models import AuthBase
 from engine.auth.providers.local import LocalDemoOTPProvider
 from engine.auth.service import AuthService
-from models import Lab, Medication, Patient
+from models import Lab, Medication, Order, Patient
 from tests.test_client import LocalTestClient
 
 
@@ -52,6 +52,15 @@ class TestRoleDashboards(unittest.TestCase):
         m3 = Medication(patient_id=p3.id, drug_name="lisinopril", dose="10", dose_unit="mg", frequency="daily")
         l3 = Lab(patient_id=p3.id, test_name="Potassium", value="5.3")
         self.db.add_all([m1, l1, m2, l2, m3, l3])
+        self.db.flush()
+        self.enoxaparin_order = Order(
+            patient_id=p2.id,
+            medication_id=m2.id,
+            drug_name="Enoxaparin Sodium (Lovenox)",
+            dose="80 mg / 0.8 mL",
+            status="pending",
+        )
+        self.db.add(self.enoxaparin_order)
         self.db.commit()
 
         # Temp AuditLedger
@@ -80,12 +89,18 @@ class TestRoleDashboards(unittest.TestCase):
             demo_mode=True,
         )
         self.auth_service.seed_demo_users(self.db)
+        from engine.auth.dependencies import get_current_user
+        from engine.auth.models import User
+        self.doctor_user = self.db.query(User).filter(User.role == "Doctor").first()
+        self.pharmacist_user = self.db.query(User).filter(User.role == "Clinical Pharmacist").first()
+        self.current_user = self.doctor_user
 
         app.dependency_overrides[get_db] = lambda: self.db
         from app.dependencies import get_audit_ledger
         from engine.auth.dependencies import get_auth_service
         app.dependency_overrides[get_audit_ledger] = lambda: self.audit_ledger
         app.dependency_overrides[get_auth_service] = lambda: self.auth_service
+        app.dependency_overrides[get_current_user] = lambda: self.current_user
 
         self.client = LocalTestClient(app)
 
@@ -207,6 +222,7 @@ class TestRoleDashboards(unittest.TestCase):
 
     def test_pharmacist_dashboard_data(self):
         """Verify Pharmacist dashboard returns Medication Fulfillment & Substitution metrics, availability queue, and local inventory."""
+        self.current_user = self.pharmacist_user
         res = self.client.get("/api/dashboard/pharmacist")
         self.assertEqual(res.status_code, 200)
         data = res.json()
@@ -263,14 +279,15 @@ class TestRoleDashboards(unittest.TestCase):
 
     def test_pharmacist_brand_substitution_request_and_doctor_approval_workflow(self):
         """Verify end-to-end brand substitution workflow: pharmacist suggest to doctor -> doctor approves -> ready for dispensing."""
+        self.current_user = self.pharmacist_user
+        patient = self.db.query(Patient).filter(Patient.patient_identifier == "DEMO-PT-002").first()
+        medication = self.db.query(Medication).filter(Medication.patient_id == patient.id).first()
         # 1. Pharmacist sends substitution request for unavailable Enoxaparin (Lovenox) -> Clexane
         sub_payload = {
-            "case_id": "CASE-002",
-            "patient_identifier": "DEMO-PT-002",
-            "patient_name": "Robert Chen",
-            "prescribed_medicine": "Enoxaparin Sodium (Lovenox)",
-            "strength": "80 mg / 0.8 mL",
-            "formulation": "Prefilled Syringe",
+            "patient_id": patient.id,
+            "order_id": self.enoxaparin_order.id,
+            "medication_id": medication.id,
+            "idempotency_key": "role-dashboard-request-key-1",
             "suggested_brand": "Clexane (Sanofi)",
             "reason": "Prescribed brand is currently unavailable in hospital pharmacy inventory.",
             "pharmacist_notes": "Bioequivalent low molecular weight heparin in stock (Bin D-12, 60 units)."
@@ -278,24 +295,21 @@ class TestRoleDashboards(unittest.TestCase):
         res_sub = self.client.post("/api/dashboard/pharmacist/substitution-request", json=sub_payload)
         self.assertEqual(res_sub.status_code, 200)
         sub_data = res_sub.json()
-        self.assertIn("PENDING", sub_data["status"])
+        self.assertEqual(sub_data["status"], "pending")
         self.assertIn("audit_hash", sub_data)
-        request_id = sub_data.get("request_id") or sub_data.get("case_id")
+        request_id = sub_data["request_id"]
 
         # 2. Doctor verifies and approves the substitution
+        self.current_user = self.doctor_user
         doc_payload = {
             "request_id": request_id,
-            "case_id": "CASE-002",
-            "patient_name": "Robert Chen",
-            "original_medicine": "Enoxaparin Sodium (Lovenox)",
-            "suggested_brand": "Clexane (Sanofi)",
             "decision": "APPROVED",
             "doctor_notes": "Approved. Bioequivalent formulation; continue anti-Xa monitoring protocol."
         }
         res_dec = self.client.post("/api/dashboard/doctor/substitution-decision", json=doc_payload)
         self.assertEqual(res_dec.status_code, 200)
         dec_data = res_dec.json()
-        self.assertIn("APPROVED", dec_data["status"])
+        self.assertEqual(dec_data["status"], "approved")
         self.assertIn("audit_hash", dec_data)
 
     def test_patient_medical_history_endpoint(self):

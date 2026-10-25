@@ -1,8 +1,9 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
-from sqlalchemy import desc, select
+from pydantic import BaseModel, Field
+from sqlalchemy import case, desc, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from agents.audit.ledger import AuditLedger
@@ -12,7 +13,7 @@ from engine.auth.dependencies import get_current_user, get_optional_user, requir
 from engine.auth.models import User, UserSession
 from engine.auth.providers.factory import get_sms_provider, list_available_providers
 from engine.auth.service import AuthService
-from models import Finding, Lab, Medication, Order, Patient, SafetyRule
+from models import Finding, Lab, Medication, Order, Patient, SafetyRule, SubstitutionRequest
 
 router = APIRouter(tags=["Role Dashboards & Patient History"])
 
@@ -290,26 +291,108 @@ def _get_patient_medical_history(identifier: str) -> Dict[str, Any]:
 # =========================================================================
 
 class PharmacistSubstitutionRequest(BaseModel):
-    case_id: str
-    patient_id: Optional[int] = None
-    patient_name: Optional[str] = None
-    prescribed_medicine: str
-    prescribed_brand: Optional[str] = None
-    strength: str
-    formulation: str
-    suggested_brand: str
-    reason: str = "Prescribed brand is currently unavailable."
-    pharmacist_notes: Optional[str] = None
+    patient_id: int
+    order_id: int
+    medication_id: int
+    idempotency_key: str = Field(min_length=16, max_length=128)
+    suggested_brand: str = Field(min_length=1, max_length=255)
+    reason: str = Field(min_length=1, max_length=1000)
+    pharmacist_notes: Optional[str] = Field(None, max_length=2000)
 
 
 class DoctorSubstitutionDecisionRequest(BaseModel):
-    case_id: str
-    suggested_brand: Optional[str] = None
-    decision: str  # 'APPROVED', 'REJECTED', 'CLARIFICATION_REQUIRED'
-    doctor_notes: Optional[str] = None
-    doctor_name: Optional[str] = None
-    request_id: Optional[str] = None
-    original_medicine: Optional[str] = None
+    request_id: int
+    decision: Literal["APPROVED", "REJECTED", "CLARIFICATION_REQUIRED"]
+    doctor_notes: Optional[str] = Field(None, max_length=2000)
+
+
+def _substitution_request_response(db: Session, request: SubstitutionRequest) -> Dict[str, Any]:
+    """Serialize request details from the referenced clinical records, never client-supplied names."""
+    patient = db.get(Patient, request.patient_id)
+    order = db.get(Order, request.order_id)
+    medication = db.get(Medication, request.medication_id)
+    if patient is None or order is None or medication is None:
+        raise HTTPException(status_code=409, detail="Substitution request references unavailable clinical records.")
+
+    prescribed = " ".join(
+        part for part in (
+            order.drug_name,
+            " ".join(part for part in (order.dose, order.dose_unit) if part),
+            order.route,
+            order.frequency,
+        ) if part
+    )
+    return {
+        "request_id": request.id,
+        "case_id": patient.patient_identifier,
+        "patient_id": patient.id,
+        "patient_identifier": patient.patient_identifier,
+        "patient_name": patient.name,
+        "order_id": order.id,
+        "medication_id": medication.id,
+        "prescribed_medicine": order.drug_name,
+        "original_prescription": prescribed,
+        "prescribed_brand": order.drug_name,
+        "suggested_brand": request.suggested_brand,
+        "reason": request.reason,
+        "pharmacist_note": request.pharmacist_notes or "",
+        "pharmacist_name": request.requested_by_name,
+        "request_date": request.created_at.isoformat() if request.created_at else None,
+        "status": request.status,
+        "doctor_notes": request.doctor_notes,
+        "decided_by": request.decided_by_name,
+        "decided_at": request.decided_at.isoformat() if request.decided_at else None,
+    }
+
+
+def _normalize_medication_name(value: Optional[str]) -> str:
+    return "".join(character.lower() for character in (value or "") if character.isalnum())
+
+
+def _find_persisted_queue_order(db: Session, item: Dict[str, Any]):
+    """Link a demo queue row only when one unambiguous, active DB prescription matches it."""
+    patient = db.execute(
+        select(Patient).where(Patient.patient_identifier == item.get("patient_identifier"))
+    ).scalar_one_or_none()
+    if patient is None:
+        return None, None, None
+
+    allowed_order_statuses = {"", "active", "pending", "ordered"}
+    allowed_medication_statuses = {"", "active", "pending", "ordered"}
+    generic_key = _normalize_medication_name(item.get("generic_name"))
+    prescribed_key = _normalize_medication_name(item.get("prescribed_medicine"))
+    expected_dose = _normalize_medication_name(item.get("strength"))
+    matches = []
+
+    orders = db.execute(
+        select(Order).where(Order.patient_id == patient.id).order_by(desc(Order.ordered_at), desc(Order.id))
+    ).scalars().all()
+    for order in orders:
+        if (order.status or "").strip().lower() not in allowed_order_statuses or order.medication_id is None:
+            continue
+        medication = db.get(Medication, order.medication_id)
+        if medication is None or medication.patient_id != patient.id:
+            continue
+        if (medication.status or "").strip().lower() not in allowed_medication_statuses:
+            continue
+
+        medication_key = _normalize_medication_name(medication.drug_name)
+        order_key = _normalize_medication_name(order.drug_name)
+        names_match = any(
+            candidate and (candidate == reference or candidate in reference or reference in candidate)
+            for candidate in (medication_key, order_key)
+            for reference in (generic_key, prescribed_key)
+        )
+        if not names_match:
+            continue
+
+        actual_dose = _normalize_medication_name(f"{order.dose or ''}{order.dose_unit or ''}")
+        if expected_dose and actual_dose and expected_dose not in actual_dose and actual_dose not in expected_dose:
+            continue
+        matches.append((patient, order, medication))
+
+    # Never guess which prescription a pharmacist meant when a patient has multiple matches.
+    return matches[0] if len(matches) == 1 else (None, None, None)
 
 
 class PharmacistDispenseRequest(BaseModel):
@@ -362,7 +445,7 @@ class PharmacistClarificationRequest(BaseModel):
 def get_doctor_dashboard_data(
     db: Session = Depends(get_db),
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(require_role(["Doctor"])),
 ):
     """Provides clinical decision support metrics, pending cosigns, patient risks, and pharmacy substitution requests for Physicians."""
     patients = db.execute(select(Patient).order_by(Patient.id)).scalars().all()
@@ -409,45 +492,19 @@ def get_doctor_dashboard_data(
                 "status": "pending_cosign",
             })
 
-    # Retrieve Pharmacy Substitution Requests from Audit Ledger
-    sub_requests_events = [e for e in all_events if e.event_type == "PHARMACY_SUBSTITUTION_REQUESTED"]
-    sub_decision_events = [e for e in all_events if e.event_type in ("DOCTOR_SUBSTITUTION_APPROVED", "DOCTOR_SUBSTITUTION_REJECTED", "DOCTOR_CLARIFICATION_REQUESTED")]
-    decided_cases = {e.payload.get("case_id") for e in sub_decision_events if isinstance(e.payload, dict)}
-
-    pharmacy_substitution_requests = []
-    # Seed default presentation case if not yet processed
-    if "CASE-002" not in decided_cases and not any(e.payload.get("case_id") == "CASE-002" for e in sub_requests_events if isinstance(e.payload, dict)):
-        pharmacy_substitution_requests.append({
-            "case_id": "CASE-002",
-            "patient_name": "Robert Chen (72M) • MRN-2026-8812",
-            "patient_identifier": "DEMO-PT-002",
-            "original_prescription": "Enoxaparin Sodium 80 mg / 0.8 mL SC Daily",
-            "prescribed_brand": "Lovenox 80 mg / 0.8 mL Pre-filled Syringe",
-            "reason": "Prescribed brand Lovenox 80 mg is currently unavailable in local dispensary stock.",
-            "suggested_brand": "Clexane 80 mg / 0.8 mL Pre-filled Syringe",
-            "availability": "Available (60 Syringes in Bin D-12)",
-            "pharmacist_note": "Equivalent brand with identical active ingredient and strength available in dispensary stock.",
-            "request_date": "2026-10-08 11:20 UTC",
-            "status": "PENDING DOCTOR VERIFICATION",
-        })
-
-    for ev in sub_requests_events:
-        p = ev.payload if isinstance(ev.payload, dict) else {}
-        c_id = p.get("case_id")
-        if c_id not in decided_cases and not any(r["case_id"] == c_id for r in pharmacy_substitution_requests):
-            pharmacy_substitution_requests.append({
-                "case_id": c_id,
-                "patient_name": p.get("patient_name", f"Case {c_id}"),
-                "patient_identifier": p.get("patient_identifier", f"PT-{c_id}"),
-                "original_prescription": f"{p.get('prescribed_medicine')} {p.get('strength')} {p.get('formulation')}",
-                "prescribed_brand": p.get("prescribed_brand", p.get("prescribed_medicine")),
-                "reason": p.get("reason", "Medication unavailable"),
-                "suggested_brand": p.get("suggested_brand", "Configured Brand Alternative"),
-                "availability": "Available",
-                "pharmacist_note": p.get("pharmacist_notes", "Pharmacist verification pending Doctor approval."),
-                "request_date": ev.timestamp,
-                "status": "PENDING DOCTOR VERIFICATION",
-            })
+    # The request table is the workflow source of truth; the audit ledger remains audit-only.
+    substitution_rows = db.execute(
+        select(SubstitutionRequest)
+        .order_by(
+            case((SubstitutionRequest.status == "pending", 0), else_=1),
+            desc(SubstitutionRequest.created_at),
+        )
+        .limit(100)
+    ).scalars().all()
+    pharmacy_substitution_requests = [
+        _substitution_request_response(db, request) for request in substitution_rows
+    ]
+    pending_substitution_count = sum(1 for request in substitution_rows if request.status == "pending")
 
     # Retrieve active findings
     findings = db.execute(select(Finding).order_by(desc(Finding.id)).limit(15)).scalars().all()
@@ -484,11 +541,11 @@ def get_doctor_dashboard_data(
 
     return {
         "role": "Doctor",
-        "clinician": current_user.full_name if current_user else "Dr. Sarah Lin, MD",
+        "clinician": current_user.full_name,
         "stats": {
             "total_patients": len(patients),
             "pending_cosigns_count": len(pending_cosigns),
-            "substitution_requests_count": len(pharmacy_substitution_requests),
+            "substitution_requests_count": pending_substitution_count,
             "active_findings_count": len(findings_list),
             "critical_alerts_count": sum(1 for f in findings_list if f["severity"].lower() in ("critical", "high", "review_required")),
         },
@@ -1058,7 +1115,7 @@ def get_pharmacist_dashboard_data(
     db: Session = Depends(get_db),
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
     resolution_engine=Depends(get_resolution_engine),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(require_role(["Clinical Pharmacist"])),
 ):
     """
     Pharmacist Dashboard: Medication Fulfillment & Substitution.
@@ -1067,12 +1124,17 @@ def get_pharmacist_dashboard_data(
     """
     all_events = audit_ledger.get_events()
 
-    # Track audit events for verification, substitution requests, and doctor decisions
+    # Keep the append-only ledger for audit/verification; request state comes from the ORM table.
     verified_events = {e.payload.get("case_id"): e for e in all_events if e.event_type in ("PHARMACIST_PRESCRIPTION_VERIFIED", "MEDICATION_MARKED_READY_FOR_DISPENSING") and isinstance(e.payload, dict)}
-    sub_requested_events = {e.payload.get("case_id"): e for e in all_events if e.event_type == "PHARMACY_SUBSTITUTION_REQUESTED" and isinstance(e.payload, dict)}
-    sub_approved_events = {e.payload.get("case_id"): e for e in all_events if e.event_type == "DOCTOR_SUBSTITUTION_APPROVED" and isinstance(e.payload, dict)}
-    sub_rejected_events = {e.payload.get("case_id"): e for e in all_events if e.event_type == "DOCTOR_SUBSTITUTION_REJECTED" and isinstance(e.payload, dict)}
     clarif_events = {e.payload.get("case_id"): e for e in all_events if e.event_type in ("PHARMACIST_CLARIFICATION_REQUESTED", "DOCTOR_CLARIFICATION_REQUESTED") and isinstance(e.payload, dict)}
+    own_requests = db.execute(
+        select(SubstitutionRequest)
+        .where(SubstitutionRequest.requested_by_user_id == current_user.id)
+        .order_by(desc(SubstitutionRequest.created_at), desc(SubstitutionRequest.id))
+    ).scalars().all()
+    requests_by_order = {}
+    for request in own_requests:
+        requests_by_order.setdefault(request.order_id, request)
 
     # Deterministic Local Medication Inventory
     local_inventory = [
@@ -1214,28 +1276,40 @@ def get_pharmacist_dashboard_data(
 
     availability_queue = []
     for item in raw_queue:
+        item = dict(item)
         c_id = item["case_id"]
-        # Determine dynamic status based on audit events
-        if c_id in verified_events:
-            status_text = "Ready for Dispensing"
-            dispense_ready = True
-            sub_status = "Dispensing Authorized ✓"
-        elif c_id in sub_approved_events:
-            status_text = "Substitution Approved by Doctor"
-            dispense_ready = True
-            sub_status = "Substitution Approved (Ready to Dispense)"
-        elif c_id in sub_rejected_events:
-            status_text = "Substitution Rejected by Doctor"
-            dispense_ready = False
-            sub_status = "Substitution Rejected"
-        elif c_id in clarif_events:
-            status_text = "Clarification Required"
-            dispense_ready = False
-            sub_status = "Clarification Required"
-        elif c_id in sub_requested_events:
+        patient, persisted_order, persisted_medication = _find_persisted_queue_order(db, item)
+        request = requests_by_order.get(persisted_order.id) if persisted_order is not None else None
+        if patient is not None:
+            item["patient_id"] = patient.id
+            item["patient_name"] = patient.name
+            item["patient_identifier"] = patient.patient_identifier
+        else:
+            item["patient_id"] = None
+        item["order_id"] = persisted_order.id if persisted_order is not None else None
+        item["medication_id"] = persisted_medication.id if persisted_medication is not None else None
+
+        # A persisted request always takes precedence over legacy case-level audit events.
+        if request is not None and request.status == "pending":
             status_text = "Pending Doctor Verification"
             dispense_ready = False
             sub_status = "Doctor Approval Pending"
+        elif request is not None and request.status == "approved":
+            status_text = "Substitution Approved by Doctor"
+            dispense_ready = True
+            sub_status = "Substitution Approved (Ready to Dispense)"
+        elif request is not None and request.status == "rejected":
+            status_text = "Substitution Rejected by Doctor"
+            dispense_ready = False
+            sub_status = "Substitution Rejected"
+        elif request is not None and request.status == "clarification_required":
+            status_text = "Clarification Required"
+            dispense_ready = False
+            sub_status = "Clarification Required"
+        elif c_id in verified_events:
+            status_text = "Ready for Dispensing"
+            dispense_ready = True
+            sub_status = "Dispensing Authorized ✓"
         else:
             status_text = "Available for Dispensing" if item["availability"] == "AVAILABLE" else "Medication Unavailable"
             dispense_ready = item["availability"] == "AVAILABLE"
@@ -1245,6 +1319,8 @@ def get_pharmacist_dashboard_data(
             **item,
             "status": status_text,
             "substitution_status": sub_status,
+            "substitution_request_id": request.id if request is not None else None,
+            "substitution_request_status": request.status if request is not None else None,
             "is_ready_for_dispensing": dispense_ready,
             "medication": item["prescribed_medicine"],  # compatibility
             "age": item["age"],
@@ -1257,8 +1333,8 @@ def get_pharmacist_dashboard_data(
     total_received = len(availability_queue)
     available_cnt = sum(1 for q in availability_queue if q["availability"] == "AVAILABLE")
     unavailable_cnt = sum(1 for q in availability_queue if q["availability"] == "UNAVAILABLE")
-    sub_requests_cnt = sum(1 for q in availability_queue if "Doctor" in q["substitution_status"] or "Substitution" in q["substitution_status"])
-    doctor_pending_cnt = sum(1 for q in availability_queue if "Pending" in q["substitution_status"] or q["substitution_status"] == "Doctor Approval Required")
+    sub_requests_cnt = sum(1 for q in availability_queue if q["substitution_request_id"] is not None)
+    doctor_pending_cnt = sum(1 for q in availability_queue if q["substitution_request_status"] == "pending")
     ready_cnt = sum(1 for q in availability_queue if q["is_ready_for_dispensing"] and (q["status"] == "Ready for Dispensing" or "Approved" in q["status"]))
 
     # Clinical pharmacology interaction profiles (Secondary Reference)
@@ -1296,12 +1372,12 @@ def get_pharmacist_dashboard_data(
         "role": "Clinical Pharmacist",
         "title": "Medication Fulfillment & Substitution",
         "primary_purpose": "Medication Availability & Brand Substitution Verification",
-        "pharmacist_name": current_user.full_name if current_user else "Marcus Vance, PharmD, BCPS",
+        "pharmacist_name": current_user.full_name,
         "stats": {
             "prescriptions_received": total_received,
             "available": available_cnt,
             "unavailable": unavailable_cnt,
-            "substitution_requests": max(sub_requests_cnt, 1),
+            "substitution_requests": sub_requests_cnt,
             "doctor_approval_pending": doctor_pending_cnt,
             "ready_for_dispensing": ready_cnt,
             # Backward compatibility fields
@@ -1332,41 +1408,132 @@ def get_pharmacist_dashboard_data(
 @router.post("/api/dashboard/pharmacist/substitution-request", summary="Pharmacist: Send brand substitution request to Doctor")
 def create_substitution_request(
     req: PharmacistSubstitutionRequest,
+    db: Session = Depends(get_db),
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(require_role(["Clinical Pharmacist"])),
 ):
     """
-    Submits a professional brand substitution request to the prescribing physician.
-    The request status becomes PENDING DOCTOR VERIFICATION. Does NOT auto-approve.
+    Persist a pharmacist request against an existing patient, order, and medication.
+    Submission never changes the prescription or marks it ready for dispensing.
     """
-    actor = current_user.full_name if current_user else "Marcus Vance, PharmD, BCPS"
-    payload = {
-        "case_id": req.case_id,
-        "patient_id": req.patient_id,
-        "patient_name": req.patient_name or f"Case {req.case_id}",
-        "prescribed_medicine": req.prescribed_medicine,
-        "prescribed_brand": req.prescribed_brand,
-        "strength": req.strength,
-        "formulation": req.formulation,
-        "suggested_brand": req.suggested_brand,
-        "reason": req.reason or "Prescribed brand is currently unavailable in local dispensary stock.",
-        "pharmacist_notes": req.pharmacist_notes or "Equivalent available brand identified in deterministic inventory.",
-        "pharmacist_name": actor,
-        "substitution_status": "PENDING_DOCTOR_VERIFICATION",
-        "action_description": f"Substitution request sent for {req.prescribed_brand} -> {req.suggested_brand}",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-    }
+    suggested_brand = req.suggested_brand.strip()
+    reason = req.reason.strip()
+    if not suggested_brand or not reason:
+        raise HTTPException(status_code=422, detail="Suggested brand and reason must contain non-whitespace text.")
+
+    patient = db.get(Patient, req.patient_id)
+    order = db.get(Order, req.order_id)
+    medication = db.get(Medication, req.medication_id)
+    if patient is None or order is None or medication is None:
+        raise HTTPException(status_code=404, detail="Patient, prescription, or medication record was not found.")
+    if order.patient_id != patient.id or medication.patient_id != patient.id:
+        raise HTTPException(status_code=422, detail="Patient, prescription, and medication references do not match.")
+    if order.medication_id != medication.id:
+        raise HTTPException(status_code=422, detail="The medication is not the medication linked to this prescription.")
+    if (order.status or "").strip().lower() not in {"", "active", "pending", "ordered"}:
+        raise HTTPException(status_code=409, detail="Substitution requests are only allowed for an active prescription.")
+    if (medication.status or "").strip().lower() not in {"", "active", "pending", "ordered"}:
+        raise HTTPException(status_code=409, detail="Substitution requests are only allowed for an active medication.")
+
+    def same_submission(existing: SubstitutionRequest) -> bool:
+        return (
+            existing.requested_by_user_id == current_user.id
+            and existing.patient_id == patient.id
+            and existing.order_id == order.id
+            and existing.medication_id == medication.id
+            and existing.suggested_brand.strip().casefold() == suggested_brand.casefold()
+            and existing.reason.strip() == reason
+            and (existing.pharmacist_notes or "").strip() == (req.pharmacist_notes or "").strip()
+        )
+
+    existing = db.execute(
+        select(SubstitutionRequest).where(SubstitutionRequest.idempotency_key == req.idempotency_key)
+    ).scalar_one_or_none()
+    if existing is not None:
+        if not same_submission(existing):
+            raise HTTPException(status_code=409, detail="Idempotency key was already used for a different request.")
+        return {
+            "request_id": existing.id,
+            "case_id": patient.patient_identifier,
+            "status": existing.status,
+            "message": "This substitution request was already recorded.",
+            "audit_event_id": None,
+            "audit_hash": None,
+        }
+
+    pending = db.execute(
+        select(SubstitutionRequest).where(
+            SubstitutionRequest.order_id == order.id,
+            SubstitutionRequest.status == "pending",
+        )
+    ).scalar_one_or_none()
+    if pending is not None:
+        if same_submission(pending):
+            return {
+                "request_id": pending.id,
+                "case_id": patient.patient_identifier,
+                "status": pending.status,
+                "message": "A pending request for this prescription is already recorded.",
+                "audit_event_id": None,
+                "audit_hash": None,
+            }
+        raise HTTPException(status_code=409, detail="This prescription already has a pending substitution request.")
+
+    request = SubstitutionRequest(
+        patient_id=patient.id,
+        order_id=order.id,
+        medication_id=medication.id,
+        idempotency_key=req.idempotency_key,
+        suggested_brand=suggested_brand,
+        reason=reason,
+        pharmacist_notes=req.pharmacist_notes.strip() if req.pharmacist_notes else None,
+        requested_by_user_id=current_user.id,
+        requested_by_name=current_user.full_name,
+        status="pending",
+    )
+    db.add(request)
+    try:
+        db.commit()
+        db.refresh(request)
+    except IntegrityError as exc:
+        db.rollback()
+        existing = db.execute(
+            select(SubstitutionRequest).where(
+                (SubstitutionRequest.idempotency_key == req.idempotency_key)
+                | (
+                    (SubstitutionRequest.order_id == order.id)
+                    & (SubstitutionRequest.status == "pending")
+                )
+            )
+        ).scalars().first()
+        if existing is not None and same_submission(existing):
+            return {
+                "request_id": existing.id,
+                "case_id": patient.patient_identifier,
+                "status": existing.status,
+                "message": "This substitution request was already recorded.",
+                "audit_event_id": None,
+                "audit_hash": None,
+            }
+        raise HTTPException(status_code=409, detail="A duplicate or conflicting request already exists.") from exc
 
     event = audit_ledger.append_event(
-        actor=actor,
+        actor=current_user.full_name,
         event_type="PHARMACY_SUBSTITUTION_REQUESTED",
-        payload=payload,
+        payload={
+            "request_id": request.id,
+            "patient_id": patient.id,
+            "order_id": order.id,
+            "medication_id": medication.id,
+            "suggested_brand": request.suggested_brand,
+            "status": request.status,
+        },
     )
-
     return {
-        "status": "PENDING_DOCTOR_VERIFICATION",
-        "message": f"Substitution request for {req.suggested_brand} successfully dispatched to Prescribing Doctor.",
-        "case_id": req.case_id,
+        "request_id": request.id,
+        "case_id": patient.patient_identifier,
+        "status": request.status,
+        "message": f"Substitution request for {request.suggested_brand} sent to the prescribing Doctor.",
         "audit_event_id": event.id,
         "audit_hash": event.hash,
     }
@@ -1379,54 +1546,70 @@ def create_substitution_request(
 @router.post("/api/dashboard/doctor/substitution-decision", summary="Doctor: Approve, Reject or Clarify Pharmacy Substitution Request")
 def process_doctor_substitution_decision(
     req: DoctorSubstitutionDecisionRequest,
+    db: Session = Depends(get_db),
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
-    current_user: Optional[User] = Depends(get_optional_user),
+    current_user: User = Depends(require_role(["Doctor"])),
 ):
     """
-    Physician authorization endpoint for pharmacy substitution requests.
-    Valid decisions: APPROVED, REJECTED, CLARIFICATION_REQUIRED.
+    Only a Doctor may decide a persisted request, and only while it is pending.
     """
-    actor = req.doctor_name or (current_user.full_name if current_user else "Dr. Sarah Lin, MD")
-    decision_clean = req.decision.strip().upper()
+    request = db.get(SubstitutionRequest, req.request_id)
+    if request is None:
+        raise HTTPException(status_code=404, detail="Substitution request was not found.")
+    if request.requested_by_user_id == current_user.id:
+        raise HTTPException(status_code=403, detail="A pharmacist cannot approve or reject their own request.")
 
-    if decision_clean in ("APPROVED", "APPROVE"):
-        event_type = "DOCTOR_SUBSTITUTION_APPROVED"
-        final_status = "SUBSTITUTION_APPROVED"
-        summary_msg = f"Brand substitution to {req.suggested_brand or 'alternative brand'} APPROVED by {actor}."
-    elif decision_clean in ("REJECTED", "REJECT"):
-        event_type = "DOCTOR_SUBSTITUTION_REJECTED"
-        final_status = "SUBSTITUTION_REJECTED"
-        summary_msg = f"Brand substitution REJECTED by {actor}. Pharmacist must not dispense alternative."
-    else:
-        event_type = "DOCTOR_CLARIFICATION_REQUESTED"
-        final_status = "CLARIFICATION_REQUIRED"
-        summary_msg = f"Clarification requested by {actor} regarding substitution."
-
-    payload = {
-        "case_id": req.case_id,
-        "suggested_brand": req.suggested_brand,
-        "decision": decision_clean,
-        "final_status": final_status,
-        "doctor_notes": req.doctor_notes or f"Clinical decision: {decision_clean}",
-        "doctor_name": actor,
-        "action_description": summary_msg,
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-    }
-
-    event = audit_ledger.append_event(
-        actor=actor,
-        event_type=event_type,
-        payload=payload,
+    final_status = {
+        "APPROVED": "approved",
+        "REJECTED": "rejected",
+        "CLARIFICATION_REQUIRED": "clarification_required",
+    }[req.decision]
+    now = datetime.utcnow()
+    result = db.execute(
+        update(SubstitutionRequest)
+        .where(
+            SubstitutionRequest.id == request.id,
+            SubstitutionRequest.status == "pending",
+        )
+        .values(
+            status=final_status,
+            doctor_notes=req.doctor_notes.strip() if req.doctor_notes else None,
+            decided_by_user_id=current_user.id,
+            decided_by_name=current_user.full_name,
+            decided_at=now,
+            updated_at=now,
+        )
     )
+    if result.rowcount != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="Only a pending substitution request can be decided.")
+    db.commit()
+    db.refresh(request)
 
+    event_type = {
+        "approved": "DOCTOR_SUBSTITUTION_APPROVED",
+        "rejected": "DOCTOR_SUBSTITUTION_REJECTED",
+        "clarification_required": "DOCTOR_CLARIFICATION_REQUESTED",
+    }[final_status]
+    event = audit_ledger.append_event(
+        actor=current_user.full_name,
+        event_type=event_type,
+        payload={
+            "request_id": request.id,
+            "patient_id": request.patient_id,
+            "order_id": request.order_id,
+            "decision": req.decision,
+            "status": final_status,
+        },
+    )
     return {
+        "request_id": request.id,
         "status": final_status,
-        "decision": decision_clean,
-        "message": summary_msg,
-        "case_id": req.case_id,
+        "decision": req.decision,
+        "message": f"Substitution request {final_status.replace('_', ' ')} by Doctor.",
         "audit_event_id": event.id,
         "audit_hash": event.hash,
-        "ready_for_dispensing": (decision_clean in ("APPROVED", "APPROVE")),
+        "ready_for_dispensing": final_status == "approved",
     }
 
 
@@ -1530,6 +1713,7 @@ def request_doctor_clarification(
 def get_patient_medical_history_endpoint(
     identifier: str,
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
+    current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"])),
 ):
     """
     Returns complete, deterministic medical history for the specified patient / case:
@@ -1574,7 +1758,9 @@ def get_patient_medical_history_endpoint(
 
 
 @router.get("/api/patient-history", summary="List All Patient Medical History Profiles")
-def list_patient_medical_histories():
+def list_patient_medical_histories(
+    current_user: User = Depends(require_role(["Doctor", "Nurse", "Clinical Pharmacist", "Administrator"])),
+):
     """Returns list of deterministic presentation patient profiles."""
     return list(DETERMINISTIC_PATIENT_HISTORIES.values())
 

@@ -4,6 +4,7 @@ from fastapi import Depends
 from agents.audit.ledger import AuditLedger
 from agents.explicator.service import ExplicatorService
 from agents.knowledge import DrugNormalizer, KnowledgeService
+from agents.resolution.alternatives import AlternativeRanker
 from agents.resolution.resolver import SafetyResolutionEngine
 from engine.event_service import MedicationEventService
 
@@ -11,9 +12,11 @@ _normalizer = DrugNormalizer()
 _knowledge_service = KnowledgeService(normalizer=_normalizer)
 _default_audit_ledger = AuditLedger(db_path="aegis_rx.db")
 _default_explicator = ExplicatorService()
+_default_alternative_ranker = AlternativeRanker()
 _default_resolution_engine = SafetyResolutionEngine(
     explicator=_default_explicator,
     audit_ledger=_default_audit_ledger,
+    alternative_ranker=_default_alternative_ranker,
 )
 _default_event_service = MedicationEventService(
     knowledge_service=_knowledge_service,
@@ -36,15 +39,25 @@ def get_explicator_service() -> ExplicatorService:
     return _default_explicator
 
 
+def get_alternative_ranker() -> AlternativeRanker:
+    return _default_alternative_ranker
+
+
 def get_resolution_engine(
     audit_ledger: AuditLedger = Depends(get_audit_ledger),
     explicator: ExplicatorService = Depends(get_explicator_service),
+    alternative_ranker: AlternativeRanker = Depends(get_alternative_ranker),
 ) -> SafetyResolutionEngine:
-    if audit_ledger is _default_audit_ledger and explicator is _default_explicator:
+    if (
+        audit_ledger is _default_audit_ledger
+        and explicator is _default_explicator
+        and alternative_ranker is _default_alternative_ranker
+    ):
         return _default_resolution_engine
     return SafetyResolutionEngine(
         explicator=explicator,
         audit_ledger=audit_ledger,
+        alternative_ranker=alternative_ranker,
     )
 
 

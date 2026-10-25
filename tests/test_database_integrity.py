@@ -26,7 +26,7 @@ from scripts.init_db import EXPECTED_TABLES, init_db
 class TestDatabaseIntegrity(unittest.TestCase):
     """
     Comprehensive database integrity test suite for AEGIS Rx:
-    - 12-table schema verification
+    - Expected application-table schema verification
     - Foreign-key integrity across clinical and intelligence layers
     - Full CRUD operations on intelligence models
     - Provenance preservation (source, version, evidence ID/text)
@@ -57,11 +57,12 @@ class TestDatabaseIntegrity(unittest.TestCase):
         Base.metadata.drop_all(bind=self.test_engine)
         self.test_engine.dispose()
 
-    # 1. Verify all 12 tables exist
-    def test_all_12_tables_exist_in_metadata_and_sqlite(self):
-        """Verify that all 12 expected tables exist in SQLAlchemy metadata and SQLite schema."""
+    # 1. Verify all expected tables exist
+    def test_all_expected_tables_exist_in_metadata_and_sqlite(self):
+        """Verify that all expected tables exist in SQLAlchemy metadata and SQLite schema."""
         metadata_tables = set(Base.metadata.tables.keys())
-        self.assertEqual(len(EXPECTED_TABLES), 12)
+        self.assertEqual(len(EXPECTED_TABLES), 13)
+        self.assertIn("substitution_requests", EXPECTED_TABLES)
         for tbl in EXPECTED_TABLES:
             self.assertIn(tbl, metadata_tables)
 
@@ -73,7 +74,7 @@ class TestDatabaseIntegrity(unittest.TestCase):
 
         for tbl in EXPECTED_TABLES:
             self.assertIn(tbl, sqlite_tables)
-        self.assertEqual(len(sqlite_tables), 12)
+        self.assertEqual(len(sqlite_tables), len(EXPECTED_TABLES))
 
     # 2. Test foreign-key integrity
     def test_foreign_key_label_evidence_to_drug(self):

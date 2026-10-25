@@ -12,6 +12,9 @@ from app.schemas import (
 )
 from database.database import get_db
 from models import Finding, Medication
+from engine.auth.dependencies import get_current_user, require_role
+from engine.auth.models import User
+
 
 router = APIRouter(prefix="/findings", tags=["Findings"])
 
@@ -153,3 +156,52 @@ def get_finding_simulated_order(
         )
 
     return pipeline_results[0].simulated_order.model_dump()
+
+
+
+@router.get(
+    "/{finding_id}/alternatives",
+    summary="Retrieve risk-gated ranked alternatives for a finding",
+)
+def get_finding_alternatives(
+    finding_id: int,
+    db: Session = Depends(get_db),
+    resolution_engine=Depends(get_resolution_engine),
+    current_user: User = Depends(require_role(["Doctor", "Clinical Pharmacist"])),
+):
+    stmt = select(Finding).where(Finding.id == finding_id)
+    finding = db.execute(stmt).scalar_one_or_none()
+    if not finding:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Finding with ID {finding_id} not found.",
+        )
+
+    active_meds = []
+    if finding.patient_id:
+        med_stmt = select(Medication).where(
+            Medication.patient_id == finding.patient_id,
+            Medication.status.in_(["active", "pending", "ordered", None]),
+        )
+        active_meds = list(db.execute(med_stmt).scalars().all())
+
+    pipeline_results = resolution_engine.resolve_findings_pipeline(
+        findings=[finding],
+        existing_medications=active_meds,
+    )
+    if not pipeline_results:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Unable to resolve finding {finding_id}.",
+        )
+
+    res = pipeline_results[0]
+    if not res.alternatives:
+        return {
+            "finding_id": finding_id,
+            "status": "no_alternatives",
+            "message": "No alternative ranker report generated.",
+            "alternatives": None,
+        }
+
+    return res.alternatives.model_dump()

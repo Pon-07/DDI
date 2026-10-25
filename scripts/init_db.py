@@ -23,6 +23,7 @@ from models import (  # noqa: F401
     Patient,
     RuleVersion,
     SafetyRule,
+    SubstitutionRequest,
 )
 
 EXPECTED_TABLES = [
@@ -38,6 +39,7 @@ EXPECTED_TABLES = [
     "patients",
     "rule_versions",
     "safety_rules",
+    "substitution_requests",
 ]
 
 

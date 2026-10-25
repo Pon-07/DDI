@@ -36,7 +36,7 @@ class TestDatabaseInitialization(unittest.TestCase):
         self.temp_dir.cleanup()
 
     def test_init_db_creates_all_expected_tables(self):
-        """Verify that init_db() creates all 12 expected tables."""
+        """Verify that init_db() creates every expected application table."""
         init_db(target_engine=self.engine, verbose=False)
 
         with self.engine.connect() as conn:
@@ -48,7 +48,7 @@ class TestDatabaseInitialization(unittest.TestCase):
         for expected in EXPECTED_TABLES:
             self.assertIn(expected, existing_tables)
 
-        self.assertEqual(len(existing_tables), 12)
+        self.assertEqual(len(existing_tables), len(EXPECTED_TABLES))
 
     def test_init_db_is_idempotent(self):
         """Verify that calling init_db() multiple times does not raise or mutate data."""
@@ -60,7 +60,7 @@ class TestDatabaseInitialization(unittest.TestCase):
                 text("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
             )
             count = result.scalar()
-            self.assertEqual(count, 12)
+            self.assertEqual(count, len(EXPECTED_TABLES))
 
     def test_wal_journal_mode_enabled(self):
         """Verify that SQLite WAL journal mode is active on SQLite file engines."""

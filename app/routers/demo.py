@@ -202,6 +202,7 @@ def run_scenario(
             "candidates_count": len(pr.ranked_candidates),
             "top_candidate": pr.ranked_candidates[0].description if pr.ranked_candidates else None,
             "requires_cosign": pr.requires_cosign,
+            "alternatives": pr.alternatives.model_dump() if pr.alternatives else None,
         })
         if pr.simulated_order:
             simulated_orders_data.append(pr.simulated_order.model_dump())
@@ -384,6 +385,7 @@ def run_scenario(
         "resolutions": resolutions_data,
         "simulated_orders": simulated_orders_data,
         "explanations": explanations_data,
+        "alternatives": [pr.alternatives.model_dump() for pr in pipeline_results if pr.alternatives] or [],
     }
 
 

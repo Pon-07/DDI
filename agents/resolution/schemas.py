@@ -1,6 +1,8 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Union
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_serializer
+
+from agents.resolution.alternatives import AlternativeReport
 
 
 class ResolutionCandidate(BaseModel):
@@ -321,6 +323,20 @@ class ResolutionPipelineResult(BaseModel):
         None,
         description="Underlying evidence identifier from validated dataset",
     )
+    alternatives: Optional[AlternativeReport] = Field(
+        default=None,
+        description=(
+            "Risk-gated, ranked replacement-drug suggestions (advisory; clinician review and co-sign required). "
+            "None unless an alternative ranker was supplied to the resolver; omitted from serialised output when None."
+        ),
+    )
+
+    @model_serializer(mode="wrap")
+    def _omit_alternatives_when_absent(self, handler):
+        data = handler(self)
+        if isinstance(data, dict) and data.get("alternatives") is None:
+            data.pop("alternatives", None)
+        return data
 
     @property
     def is_demo_rule(self) -> bool:

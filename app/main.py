@@ -21,9 +21,12 @@ from app.routers import (
 from app.schemas import SystemStatusResponse
 from database.database import engine, get_db
 from engine.auth.models import AuthBase
+from models import SubstitutionRequest
 
 # Initialize auth tables idempotently
 AuthBase.metadata.create_all(bind=engine)
+# Create the new workflow table without altering existing clinical tables.
+SubstitutionRequest.__table__.create(bind=engine, checkfirst=True)
 
 with engine.begin() as conn:
     cols = [

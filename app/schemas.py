@@ -203,6 +203,7 @@ class ResolutionPipelineResponse(BaseModel):
     source: Optional[str] = None
     source_version: Optional[str] = None
     evidence_id: Optional[str] = None
+    alternatives: Optional[Dict[str, Any]] = None
 
 
 class EventSubmissionResponse(BaseModel):

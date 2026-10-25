@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+from agents.resolution.alternatives import AlternativeReport
 from agents.resolution.schemas import (
     ResolutionCandidate,
     ResolutionPipelineResult,
@@ -62,7 +63,10 @@ class SafetyResolutionEngine:
         rule_context: Optional[Any] = None,
         explicator: Optional[Any] = None,
         audit_ledger: Optional[Any] = None,
+        alternative_ranker: Optional[Any] = None,
     ):
+        # Optional, advisory: when None (default) behaviour is exactly as before.
+        self.alternative_ranker = alternative_ranker
         self._rules_by_id: Dict[str, Any] = {}
         self._rules_by_pair: Dict[str, List[Any]] = {}
         self._rules_by_drug: Dict[str, List[Any]] = {}
@@ -775,11 +779,17 @@ class SafetyResolutionEngine:
         rule_context: Optional[Any] = None,
         existing_medication: Optional[Any] = None,
         patient_id: Optional[Union[int, str]] = None,
+        active_medications: Optional[List[Any]] = None,
+        patient_context: Optional[Dict[str, Any]] = None,
     ) -> ResolutionPipelineResult:
         """
         Execute the complete deterministic safety resolution pipeline:
         Finding -> deterministic resolution -> safety-filtered candidate actions -> ranked candidates -> cosign-ready simulated order.
         Optionally generates explanation and records immutable events in audit ledger.
+
+        If an `alternative_ranker` was supplied to the engine, risk-gated replacement-drug suggestions are attached
+        as `result.alternatives` (advisory, requires clinician co-sign). `active_medications` (names or dicts) and
+        `patient_context` feed that ranker only; they never change the rule-based resolution above.
         """
         finding_id = (
             self._extract_finding_attr(finding, "id")
@@ -825,6 +835,20 @@ class SafetyResolutionEngine:
                 existing_medication=existing_medication,
                 patient_id=patient_id,
             )
+
+        # 4b. Optional alternative-drug ranker (advisory; never alters the resolution above)
+        alternatives = None
+        if self.alternative_ranker is not None:
+            try:
+                alternatives = self.alternative_ranker.build_report(
+                    finding, active_medications=active_medications, patient_context=patient_context
+                )
+            except Exception as exc:  # the ranker must never break the safety pipeline
+                alternatives = AlternativeReport(
+                    risk_tier="UNKNOWN",
+                    gate_reason="Alternative ranker failed; no alternatives generated.",
+                    no_alternatives_reason=f"Alternative ranker error ({type(exc).__name__}). Clinician review required.",
+                )
 
         # 5. Optional Explicator integration
         explanation = None
@@ -923,6 +947,26 @@ class SafetyResolutionEngine:
                     },
                 )
 
+            # Audit alternative suggestions if a ranker was configured (original finding provenance is unchanged above)
+            if alternatives is not None:
+                self.audit_ledger.append_event(
+                    actor="alternative_ranker",
+                    event_type="ALTERNATIVES_RANKED",
+                    payload={
+                        "finding_id": finding_id,
+                        "rule_id": str(rule_id) if rule_id else None,
+                        "source": str(source) if source else None,
+                        "source_version": str(source_version) if source_version else None,
+                        "evidence_id": str(evidence_id) if evidence_id else None,
+                        "ranker_version": alternatives.ranker_version,
+                        "risk_tier": alternatives.risk_tier,
+                        "alternatives_shown": {rs.replaces: [c.drug_name for c in rs.candidates] for rs in alternatives.replacement_sets},
+                        "consolidation_action": alternatives.consolidation_action.action_type if alternatives.consolidation_action else None,
+                        "requires_cosign": True,
+                        "auto_execute": False,
+                    },
+                )
+
         return ResolutionPipelineResult(
             finding_id=finding_id,
             finding_severity=severity,
@@ -938,6 +982,7 @@ class SafetyResolutionEngine:
             source=str(source) if source else None,
             source_version=str(source_version) if source_version else None,
             evidence_id=str(evidence_id) if evidence_id else None,
+            alternatives=alternatives,
         )
 
     def resolve_findings_pipeline(
@@ -945,6 +990,7 @@ class SafetyResolutionEngine:
         findings: List[Union[Finding, Dict[str, Any], Any]],
         rule_context: Optional[Any] = None,
         existing_medications: Optional[List[Any]] = None,
+        active_medications: Optional[List[Any]] = None,
     ) -> List[ResolutionPipelineResult]:
         """
         Execute the pipeline for a collection of findings.
@@ -996,9 +1042,14 @@ class SafetyResolutionEngine:
                 elif drug_b and str(drug_b).lower().strip() in meds_by_name:
                     matched_med = meds_by_name[str(drug_b).lower().strip()]
 
+            extra: Dict[str, Any] = {}
+            if self.alternative_ranker is not None:
+                # only consulted by the optional alternative ranker; defaults to the existing medication list
+                extra["active_medications"] = active_medications if active_medications is not None else existing_medications
             res = self.resolve_finding_pipeline(
                 finding=f,
                 existing_medication=matched_med,
+                **extra,
             )
             results.append(res)
 
