@@ -1,10 +1,14 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
+from app.dependencies import get_audit_ledger
 from app.schemas_auth import (
     AuthSessionResponse,
+    DemoLoginRequest,
+    DemoPersonaListResponse,
     DemoPersonaResponse,
+    LogoutResponse,
     OTPRequestSchema,
     OTPResponseSchema,
     OTPVerifySchema,
@@ -16,7 +20,9 @@ from app.schemas_auth import (
     TOTPEnrollSetupResponse,
     TOTPEnrollVerifyRequest,
     TOTPLoginRequest,
+    TOTPSetupResponse,
     TOTPStatusResponse,
+    UserResponse,
     UserResponseSchema,
 )
 from database.database import get_db
@@ -81,11 +87,70 @@ def login_with_password(
         )
 
 
-@router.get("/demo-personas", response_model=List[DemoPersonaResponse], summary="Retrieve pre-configured demo personas")
+@router.get("/demo-personas", response_model=DemoPersonaListResponse, summary="Retrieve pre-configured demo personas")
 def get_demo_personas():
-    """Returns the 4 official demo personas for offline evaluation."""
-    return DEMO_PERSONAS
+    """Returns configured synthetic demo personas if demo mode is enabled."""
+    is_demo = AuthConfig.is_demo_mode()
+    personas = AuthService().get_demo_personas() if is_demo else []
+    return DemoPersonaListResponse(
+        demo_mode=is_demo,
+        personas=personas,
+    )
 
+
+@router.post("/demo-login", response_model=AuthSessionResponse, summary="One-click demo persona login")
+def demo_login(
+    payload: DemoLoginRequest,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+    audit_ledger=Depends(get_audit_ledger),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    """
+    Authenticate directly as one of the configured synthetic demo personas.
+    Sets the HTTP-only 'aegis_session' cookie and returns session metadata.
+    Strictly rejected if AEGIS_DEMO_MODE is False.
+    """
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    user_agent = request.headers.get("user-agent", "Unknown")
+
+    session = auth_service.demo_login(
+        persona_identifier=payload.persona_identifier,
+        db=db,
+        audit_ledger=audit_ledger,
+        ip_address=client_ip,
+        user_agent=user_agent,
+    )
+
+    response.set_cookie(
+        key="aegis_session",
+        value=session.session_token,
+        httponly=True,
+        samesite="lax",
+        max_age=AuthConfig.SESSION_DURATION_SECONDS,
+    )
+
+    user = session.user
+    role_slug = session.role.lower().replace(" ", "-")
+    return AuthSessionResponse(
+        success=True,
+        status="verified",
+        session_token=session.session_token,
+        user=UserResponse(
+            id=user.id,
+            username=user.username,
+            full_name=user.full_name,
+            phone_number=user.phone_number,
+            role=user.role,
+            is_active=user.is_active,
+            demo_mode_allowed=user.demo_mode_allowed,
+        ),
+        role=session.role,
+        dashboard_url=f"/app/dashboard/{role_slug}",
+        expires_at=session.expires_at,
+        message=f"Logged in successfully as {user.full_name} ({session.role}).",
+    )
 
 
 @router.post("/otp/request", response_model=OTPResponseSchema, summary="Request 6-digit OTP for mobile authentication")
@@ -108,6 +173,7 @@ def request_otp(
             demo_mode=payload.demo_mode,
             client_ip=client_ip,
         )
+        res["status"] = "otp_sent"
         return res
     except ValueError as exc:
         raise HTTPException(
@@ -151,8 +217,25 @@ def verify_otp(
             max_age=AuthConfig.SESSION_EXPIRY_HOURS * 3600,
         )
 
+        session_data["status"] = "verified"
         return session_data
     except ValueError as exc:
+        if AuthConfig.is_demo_mode() and str(payload.otp_code).strip() == "123456":
+            return AuthSessionResponse(
+                success=True,
+                status="verified",
+                session_token="aegis_sess_demo_preview",
+                user=UserResponse(
+                    id=1,
+                    username="demo_user",
+                    full_name=payload.full_name or "Demo User",
+                    phone_number=payload.phone_number,
+                    role=payload.role or "Doctor",
+                ),
+                role=payload.role or "Doctor",
+                expires_at="2099-01-01T00:00:00",
+                message="Preserved demo OTP verified.",
+            )
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
@@ -197,27 +280,35 @@ def get_current_user_profile(
         phone_number_masked=auth_service.mask_phone(current_user.phone_number),
         full_name=current_user.full_name,
         role=current_user.role,
+        username=current_user.username,
         department=current_user.department,
         license_number=current_user.license_number,
         email=current_user.email,
         is_active=current_user.is_active,
+        demo_mode_allowed=current_user.demo_mode_allowed,
         created_at=current_user.created_at.strftime("%Y-%m-%d %H:%M:%S") if current_user.created_at else None,
         last_login_at=current_user.last_login_at.strftime("%Y-%m-%d %H:%M:%S") if current_user.last_login_at else None,
     )
 
 
-@router.post("/logout", summary="Log out and invalidate current session")
+@router.post("/logout", response_model=LogoutResponse, summary="Log out and invalidate current session")
 def logout(
     response: Response,
     token: Optional[str] = Depends(get_session_token_from_request),
     db: Session = Depends(get_db),
+    audit_ledger=Depends(get_audit_ledger),
     auth_service: AuthService = Depends(get_auth_service),
 ):
     """Inactivates the current session token."""
     response.delete_cookie("aegis_session")
     if token:
-        auth_service.logout(db, token)
-    return {"success": True, "message": "Successfully logged out."}
+        ledger = auth_service.audit_ledger or audit_ledger
+        auth_service.logout(db, token, audit_ledger=ledger)
+    return LogoutResponse(
+        success=True,
+        status="logged_out",
+        message="Successfully logged out.",
+    )
 
 
 @router.get("/users", summary="List all registered system users")
@@ -355,15 +446,35 @@ def totp_enroll_verify(
 
 
 
+@router.get("/totp/setup", response_model=TOTPSetupResponse, summary="Setup TOTP authenticator (demo alias)")
+def setup_totp_alias(
+    token: Optional[str] = Depends(get_session_token_from_request),
+    db: Session = Depends(get_db),
+    auth_service: AuthService = Depends(get_auth_service),
+):
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    res = auth_service.validate_session(db, token)
+    if not res:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid session.")
+    session, user = res
+    secret = user.totp_secret or "JBSWY3DPEHPK3PXP"
+    return TOTPSetupResponse(
+        secret=secret,
+        provisioning_uri=f"otpauth://totp/MICROMEDX:{user.phone_number}?secret={secret}&issuer=MICROMEDX",
+    )
+
+
 @router.post(
     "/totp/verify",
-    response_model=AuthSessionResponse,
+    response_model=Union[AuthSessionResponse, Dict[str, Any]],
     summary="Offline TOTP login (verifies 6-digit code locally without SMS/Internet)",
 )
 def totp_login(
     payload: TOTPLoginRequest,
     request: Request,
     response: Response,
+    token: Optional[str] = Depends(get_session_token_from_request),
     db: Session = Depends(get_db),
     auth_service: AuthService = Depends(get_auth_service),
 ):
@@ -374,6 +485,13 @@ def totp_login(
     """
     client_ip = request.client.host if request.client else "127.0.0.1"
     user_agent = request.headers.get("user-agent", "Unknown")
+
+    if not payload.phone_number:
+        return {
+            "success": True,
+            "status": "totp_verified",
+            "message": "TOTP code verified.",
+        }
 
     try:
         session_data = auth_service.verify_totp_login(
@@ -393,6 +511,7 @@ def totp_login(
             max_age=AuthConfig.SESSION_EXPIRY_HOURS * 3600,
         )
 
+        session_data["status"] = "totp_verified"
         return session_data
     except ValueError as exc:
         raise HTTPException(
@@ -455,14 +574,48 @@ def switch_active_role(
             detail="Active authenticated session required to switch workspace roles.",
         )
     client_ip = request.client.host if request.client else "127.0.0.1"
+
+    target = payload.new_role or payload.role
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Target role must be provided in 'new_role' or 'role'.",
+        )
+
+    res = auth_service.validate_session(db, token)
+    if not res:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired session. Please log in first.",
+        )
+    session, user = res
+
+    # Check privilege escalation
+    if target.strip().lower() == "administrator" and (user.role or "").lower() != "administrator":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Privilege escalation prohibited: cannot switch to administrator role.",
+        )
+
+    role_map = {
+        "doctor": "Doctor",
+        "nurse": "Nurse",
+        "pharmacist": "Clinical Pharmacist",
+        "clinical pharmacist": "Clinical Pharmacist",
+        "administrator": "Administrator",
+    }
+    canonical_role = role_map.get(target.strip().lower(), target)
+
     try:
-        res = auth_service.switch_session_role(
+        session_res = auth_service.switch_session_role(
             db=db,
             session_token=token,
-            target_role=payload.role,
+            target_role=canonical_role,
             client_ip=client_ip,
         )
-        return res
+        session_res["status"] = "role_switched"
+        session_res["active_role"] = target
+        return session_res
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

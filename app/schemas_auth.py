@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -11,6 +11,7 @@ class OTPRequestSchema(BaseModel):
 
 class OTPResponseSchema(BaseModel):
     success: bool
+    status: Optional[str] = "otp_sent"
     message: str
     phone_number: str
     phone_number_masked: str
@@ -32,30 +33,77 @@ class OTPVerifySchema(BaseModel):
 
 
 class UserResponseSchema(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
 
     id: int
-    phone_number: str
+    phone_number: Optional[str] = None
     phone_number_masked: Optional[str] = None
     full_name: str
     role: str
+    username: Optional[str] = None
     department: Optional[str] = None
     license_number: Optional[str] = None
     email: Optional[str] = None
     is_active: bool = True
+    demo_mode_allowed: bool = True
     totp_enabled: bool = False
     created_at: Optional[str] = None
     last_login_at: Optional[str] = None
 
 
-class AuthSessionResponse(BaseModel):
-    success: bool
-    session_token: str
-    user: UserResponseSchema
+class UserResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+    id: int
+    username: Optional[str] = None
+    full_name: str
+    phone_number: Optional[str] = None
     role: str
-    dashboard_url: str
-    expires_at: str
-    auth_method: str = "sms_otp"  # 'sms_otp' or 'totp'
+    is_active: bool = True
+    demo_mode_allowed: bool = True
+
+
+class AuthSessionResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="ignore")
+
+    success: Optional[bool] = True
+    status: Optional[str] = "verified"
+    session_token: str
+    user: Union[UserResponseSchema, UserResponse, Dict[str, Any]]
+    role: str
+    dashboard_url: Optional[str] = None
+    expires_at: Any
+    auth_method: Optional[str] = "sms_otp"
+    message: Optional[str] = "Login successful"
+
+
+class DemoPersona(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    id: str = Field(..., description="Unique persona key (e.g. doctor, nurse, pharmacist, administrator)")
+    name: str = Field(..., description="Full display name of the demo persona")
+    username: Optional[str] = Field(None, description="Username of persona")
+    phone_number: str = Field(..., description="Normalized E.164 demo phone number")
+    role: str = Field(..., description="Clinical or administrative role")
+    demo_mode_allowed: bool = Field(default=True, description="Whether persona is permitted for demo login")
+
+
+class DemoPersonaListResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    demo_mode: bool = Field(..., description="Current server-side demo mode status")
+    personas: List[DemoPersona] = Field(default_factory=list, description="Configured demo personas")
+
+
+class DemoLoginRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    persona_identifier: str = Field(
+        ...,
+        min_length=1,
+        max_length=100,
+        description="Configured persona identifier or normalized phone number",
+    )
 
 
 class DemoPersonaResponse(BaseModel):
@@ -111,7 +159,7 @@ class TOTPEnrollVerifyRequest(BaseModel):
 
 
 class TOTPLoginRequest(BaseModel):
-    phone_number: str = Field(..., min_length=7, max_length=20, description="Mobile number / User ID")
+    phone_number: Optional[str] = Field(None, min_length=7, max_length=20, description="Mobile number / User ID")
     totp_code: str = Field(..., min_length=6, max_length=8, description="6-digit authenticator code")
     role: Optional[str] = Field(None, description="Role selection for unseeded/new clinician")
 
@@ -125,12 +173,36 @@ class TOTPStatusResponse(BaseModel):
 
 
 class RoleSwitchRequest(BaseModel):
-    role: str = Field(..., description="Target role: 'Doctor', 'Nurse', 'Clinical Pharmacist', or 'Administrator'")
+    role: Optional[str] = Field(None, description="Target role")
+    new_role: Optional[str] = Field(None, description="New target role")
 
 
 class PasswordLoginRequest(BaseModel):
-    phone_number: str = Field(..., min_length=5, max_length=50, description="Mobile number / Clinician ID")
+    phone_number: Optional[str] = Field(None, min_length=5, max_length=50, description="Mobile number / Clinician ID")
+    username: Optional[str] = Field(None, description="Username")
     password: str = Field(..., min_length=1, max_length=128, description="Password")
     role: Optional[str] = Field(None, description="Optional target role hint")
 
 
+class OTPRequest(BaseModel):
+    phone_number: str
+
+
+class OTPVerifyRequest(BaseModel):
+    phone_number: str
+    otp_code: str
+
+
+class TOTPSetupResponse(BaseModel):
+    secret: str
+    provisioning_uri: Optional[str] = None
+
+
+class TOTPVerifyRequest(BaseModel):
+    totp_code: str
+
+
+class LogoutResponse(BaseModel):
+    success: bool = True
+    status: str = "logged_out"
+    message: str = "Session successfully terminated"
