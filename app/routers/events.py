@@ -43,7 +43,6 @@ def submit_event(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail=f"Medication '{med_name}' not recognized in the local medication knowledge base.",
             )
-
     try:
         affected_findings, pipeline_results = event_service.process_event_with_resolutions(
             db=db,
